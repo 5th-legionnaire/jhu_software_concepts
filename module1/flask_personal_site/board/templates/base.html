@@ -1,4 +1,4 @@
-#This is the base template for the message board application. It defines the overall structure of the HTML page, including the title, header, and main content area. The template uses Jinja2 blocks to allow child templates to override specific sections of the page, such as the title, header, and content.
+<!--This is the base template for the message board application. It defines the overall structure of the HTML page, including the title, header, and main content area. The template uses Jinja2 blocks to allow child templates to override specific sections of the page, such as the title, header, and content.-->
 
 <!DOCTYPE html>
 <html lang="en">
@@ -6,15 +6,13 @@
   <title>Personal Website - {% block title %}{% endblock title %}</title>
 </head>
 <body>
-<h1>About Me</h1>
+<h1>Personal Website</h1>
 <section>
   <header>
     {% block header %}{% endblock header %}
   </header>
   <main>
     {% block content %}<p>Name: Josh Latz</p>{% endblock content %}
-    {% block content %}<p>Current Role: Vice President of Delivery Enginering and AI Enablement, Virtru</p>{% endblock content %}
-    {% block content %}<p>Bio: foobar</p>{% endblock content %}
   </main>
 </section>
 </body>
