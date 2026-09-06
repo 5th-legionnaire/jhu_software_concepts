@@ -1,0 +1,15 @@
+#This is the home page template for the personal website. It extends the base template and provides specific content for the home page, including a welcome message and a brief introduction.
+
+{% extends "base.html" %}
+
+{% block title %}Home{% endblock title %}
+
+{% block header %}
+  <h2>Welcome to My Personal Website!</h2>
+{% endblock header %}
+
+{% block content %}
+  <p>Hello! My name is Josh Latz, and I am currently the Vice President of Delivery Engineering and AI Enablement at Virtru. I have a passion for technology and enjoy working on innovative projects that make a difference.</p>
+  <p>A little bit more about me: In my current role which I just began on 8/31/2026, I lead the teams that put data-centric security in customers' hands. Prior to that, I spent nearly a decade at Amazon, most recently as a Senior Software Development Manager in Amazon Security running a 50-engineer organization behind the authorization control plane, with earlier stops in technical product management, program management, and business development across AWS infrastructure and the JEDI program. Before tech, I served in U.S. Army Special Forces as SOT-A team leader. I hold a Georgetown Executive MBA and I'm pursuing an MS in AI at Johns Hopkins.</p>
+  <p>Feel free to explore my website to learn more about my work, interests, and experiences.</p>
+{% endblock content %}
