@@ -3,10 +3,12 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <title>Personal Website - {% block title %}{% endblock title %}</title>
+  <title>Personal Website - {% block title %}Josh Latz{% endblock title %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
-<h1>Personal Website</h1>
+<h1>Josh Latz (He/Him)</h1>
+{% include "_navigation.html" %}
 <section>
   <header>
     {% block header %}{% endblock header %}

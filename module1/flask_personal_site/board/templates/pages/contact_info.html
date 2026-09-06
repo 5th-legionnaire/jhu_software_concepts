@@ -5,15 +5,10 @@
 {% block title %}Contact Info{% endblock title %}
 
 {% block header %}
-  <h2>Contact Information</h2>
+  <h1>Contact Information</h1>
 {% endblock header %}
 
 {% block content %}
-  <p>If you'd like to get in touch with me, you can reach me at josh.latz@gmail.com or through my professional LinkedIn profile here: https://www.linkedin.com/in/joshua-latz/.</p>
-{% endblock content %}
-
-{% block content %}
-  <p>
-    Learn more about me by visiting the <a href="{{ url_for('pages.home') }}">home page.</a>.
-  </p>
+  <p>If you'd like to get in touch with me, you can reach me at <a href="mailto:josh.latz@gmail.com">josh.latz@gmail.com</a> or through my professional <a href="https://www.linkedin.com/in/joshua-latz/" target="_blank">LinkedIn profile</a>.</p>
+  <p>Learn more about me by visiting the <a href="{{ url_for('pages.home') }}">home page.</a>.</p>
 {% endblock content %}
