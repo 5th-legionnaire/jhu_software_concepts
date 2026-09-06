@@ -4,15 +4,21 @@
 <html lang="en">
 <head>
   <title>Personal Website - {% block title %}Josh Latz{% endblock title %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
 </head>
 <body>
-<h1>Josh Latz (He/Him)</h1>
-{% include "_navigation.html" %}
+<header class="site-header">
+  <div class="site-header__inner">
+    <a class="site-title" href="{{ url_for('pages.home') }}">
+      Josh Latz <span class="site-title__sub">(He/Him)</span>
+    </a>
+    {% include "_navigation.html" %}
+  </div>
+</header>
 <section>
-  <header>
+  <div class="page-header">
     {% block header %}{% endblock header %}
-  </header>
+  </div>
   <main>
     {% block content %}<p>Name: Josh Latz</p>{% endblock content %}
   </main>

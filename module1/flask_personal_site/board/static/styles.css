@@ -1,34 +1,124 @@
+:root {
+  --color-bg: #f5f7fa;
+  --color-surface: #ffffff;
+  --color-text: #1f2933;
+  --color-muted: #52606d;
+  --color-primary: #0f2a4a;
+  --color-primary-dark: #0a1d33;
+  --color-accent: #2f80ed;
+  --color-accent-hover: #1c64d1;
+  --color-border: #e2e8f0;
+}
+
 * {
   box-sizing: border-box;
 }
 
 body {
-  font-family: sans-serif;
-  font-size: 20px;
-  margin: 0 auto;
-  text-align: center;
+  font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 18px;
+  line-height: 1.6;
+  margin: 0;
+  background-color: var(--color-bg);
+  color: var(--color-text);
 }
 
 a,
 a:visited {
-  color: #007bff;
+  color: var(--color-accent);
+  text-decoration: none;
 }
 
 a:hover {
-  color: #0056b3;
+  color: var(--color-accent-hover);
+  text-decoration: underline;
 }
 
-nav ul {
+/* Top navigation bar */
+.site-header {
+  background-color: var(--color-primary);
+  border-bottom: 3px solid var(--color-accent);
+}
+
+.site-header__inner {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 16px 24px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.site-title,
+.site-title:visited {
+  color: #ffffff;
+  font-size: 1.4rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.site-title:hover {
+  color: #ffffff;
+  text-decoration: none;
+  opacity: 0.9;
+}
+
+.site-title__sub {
+  font-weight: 400;
+  color: #c9d6e3;
+  font-size: 1rem;
+}
+
+.site-nav ul {
   list-style-type: none;
   padding: 0;
+  margin: 0;
+  display: flex;
+  gap: 24px;
 }
 
-nav ul li {
-  display: inline;
-  margin: 0 5px;
+.site-nav a,
+.site-nav a:visited {
+  color: #e2e8f0;
+  font-weight: 500;
+}
+
+.site-nav a:hover {
+  color: #ffffff;
+  text-decoration: underline;
+}
+
+/* Page content */
+.page-header {
+  max-width: 900px;
+  margin: 0 auto;
+  padding: 24px 24px 0;
+  text-align: center;
+}
+
+.page-header h2 {
+  color: var(--color-primary);
+  margin-bottom: 0;
 }
 
 main {
-  width: 80%;
+  max-width: 900px;
   margin: 0 auto;
+  padding: 24px;
+  background-color: var(--color-surface);
+  border-radius: 8px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.08);
+}
+
+@media (max-width: 600px) {
+  .site-header__inner {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
+  .site-nav ul {
+    gap: 16px;
+  }
 }
