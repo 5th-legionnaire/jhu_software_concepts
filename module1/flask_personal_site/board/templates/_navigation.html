@@ -2,8 +2,8 @@
 
 <nav class="site-nav">
   <ul>
-    <li><a href="{{ url_for('pages.home') }}">Home</a></li>
-    <li><a href="{{ url_for('pages.projects_and_publications') }}">Projects and Publications</a></li>
-    <li><a href="{{ url_for('pages.contact_info') }}">Contact Info</a></li>
+    <li><a href="{{ url_for('pages.home') }}" class="{{ 'is-active' if request.endpoint == 'pages.home' }}">Home</a></li>
+    <li><a href="{{ url_for('pages.projects_and_publications') }}" class="{{ 'is-active' if request.endpoint == 'pages.projects_and_publications' }}">Projects and Publications</a></li>
+    <li><a href="{{ url_for('pages.contact_info') }}" class="{{ 'is-active' if request.endpoint == 'pages.contact_info' }}">Contact Info</a></li>
   </ul>
 </nav>

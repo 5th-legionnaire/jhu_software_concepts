@@ -83,11 +83,25 @@ a:hover {
 .site-nav a:visited {
   color: #e2e8f0;
   font-weight: 500;
+  padding: 6px 4px;
+  border-bottom: 2px solid transparent;
 }
 
 .site-nav a:hover {
   color: #ffffff;
   text-decoration: underline;
+}
+
+.site-nav a.is-active,
+.site-nav a.is-active:visited {
+  color: var(--color-accent);
+  border-bottom-color: var(--color-accent);
+  text-decoration: none;
+}
+
+.site-nav a.is-active:hover {
+  color: var(--color-accent);
+  text-decoration: none;
 }
 
 /* Page content */
