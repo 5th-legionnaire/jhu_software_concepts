@@ -41,6 +41,22 @@ When you're done, exit the virtual environment with:
 
      deactivate
 
+Creating the Canvas submission zip
+-----------------------------------
+The Canvas submission must match the GitHub repository exactly, so build
+the zip from git's tracked files rather than zipping the folder as-is
+(which would also pick up venv/, __pycache__/, and other local-only
+files). From the repository root (jhu_software_concepts/), after
+committing all changes:
+
+     git archive --format=zip -o module1.zip HEAD -- module1
+
+This produces module1.zip containing only the files tracked in the
+module1/ folder at the current commit, matching what's on GitHub.
+Include the zipped screenshots PDF (see Project Structure and
+Reproducibility below) in module1/ before committing, so it's captured
+in the archive too.
+
 Project layout
 --------------
 run.py                   - Entry point; run with `python run.py`
