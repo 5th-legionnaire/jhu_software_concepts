@@ -1,8 +1,24 @@
 # Python
 __pycache__/
-*.pyc
+*.py[cod]
+
+# Virtual environments
 venv/
 .venv/
+
+# Local model weights (downloaded on first run, ~650MB)
+*.gguf
+**/llm_hosting/models/
+.cache/
+
+# Scraper working files
+raw_pages/
+chunks/
+chunk_*.json
+sample_*.json
+*.json.out
+*.json.log
+log_*.txt
 
 # macOS
 .DS_Store
@@ -14,29 +30,3 @@ venv/
 ~$*.xlsx
 ~$*.ppt
 ~$*.pptx
-
-# Local model weights (downloaded on first run, ~650MB)
-*.gguf
-llm_hosting/models/
-.cache/
-
-# Virtual environments
-.venv/
-venv/
-
-# Python
-__pycache__/
-*.py[cod]
-
-# Scraper working files
-raw_pages/
-chunk_*.json
-*.json.out
-*.json.log
-log_*.txt
-sample_*.json
-
-# macOS
-.DS_Storechunks/
-sample_*.json
-chunks/*.log
