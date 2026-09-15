@@ -38,3 +38,5 @@ sample_*.json
 
 # macOS
 .DS_Storechunks/
+sample_*.json
+chunks/*.log
