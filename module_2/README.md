@@ -53,8 +53,16 @@ jhu_software_concepts/
 
 The captured HTML in `raw_pages/` is committed so the parsed JSON can be traced back to its
 source and re-parsed without rerunning the scrape. The TinyLlama model weights (`*.gguf`, roughly
-650 MB) are excluded via `.gitignore` and download automatically on first run, as do the virtual
+650 MB) are excluded via `.gitignore` and download automatically on first run, as are the virtual
 environments, which are reconstructed from the two `requirements.txt` files.
+
+**Note on the Canvas submission:** `raw_pages/` and `chunks/` are omitted from the zipped
+`module_2` folder submitted through Canvas, to keep the upload to a reasonable size. Both are
+present in full in the GitHub repository. Everything needed to grade or rerun the assignment is
+in the zip: the source files, both JSON deliverables, the `llm_hosting/` package, the robots.txt
+screenshot, and both `requirements.txt` files. `raw_pages/` holds the captured HTML the parser
+consumes, so running `clean.py` from the zip alone will produce an empty result until the pages
+are either pulled from GitHub or regenerated with `scrape.py`.
 
 ---
 
@@ -601,4 +609,5 @@ you would fix it.>`
 8. [ ] This README under `module_2`
 9. [ ] `requirements.txt` under `module_2`
 10. [ ] Zipped `module_2` folder uploaded to Canvas, matching the GitHub push
+    (excluding `raw_pages/` and `chunks/` for size; see section 2)
 11. [ ] Final GitHub push timestamped before submission
