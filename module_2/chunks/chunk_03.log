@@ -1,0 +1,4 @@
+/Users/jjlatz/localdev/en60525683_modern_software_concepts/jhu_software_concepts/module_2/llm_hosting/.venv/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py:197: UserWarning: The `force_filename` argument is deprecated and ignored in `hf_hub_download`. Filename is always the same as on the Hub.
+  warnings.warn(
+/Users/jjlatz/localdev/en60525683_modern_software_concepts/jhu_software_concepts/module_2/llm_hosting/.venv/lib/python3.14/site-packages/huggingface_hub/utils/_validators.py:205: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
