@@ -26,7 +26,7 @@ reported approximately 32,324 results. This window was chosen for two reasons: i
 analytically coherent rather than a mixture of several cycles with different applicant pools. For
 reference, the site reports roughly 958,851 records in total across its full history.
 
-**Entries collected:** `<TODO: final count from applicant_data.json>`
+**Entries collected:** 30,000 applicant entries, all with unique permalinks.
 
 ---
 
@@ -179,7 +179,7 @@ programmatically with `urllib.robotparser.RobotFileParser`. See section 5.4 for 
 caveat about what that check does and does not catch.
 
 ### 5.2 What the file says
-Retrieved `<TODO: date of capture>`. The live file differs substantially from the version shown
+Retrieved 13 September 2026 and re-checked 14 September 2026. The live file differs substantially from the version shown
 in the Module 2 lecture slides: the historical `Disallow: /cgi-bin/` and
 `Disallow: /index-ad-test.php` rules are no longer present, and Cloudflare-managed AI crawler
 rules and a `Content-Signal` declaration have been added.
@@ -428,9 +428,16 @@ The instructor-provided standardizer under `llm_hosting/` was run in CLI mode ov
 records, producing `llm-generated-program` and `llm-generated-university` alongside the original
 `program` field.
 
-Changes made to the provided files: `<TODO: list every edit to app.py, the canonical lists, or
-requirements.txt, and why. Note at minimum the deprecated hf_hub_download arguments
-(force_filename, local_dir_use_symlinks) that newer huggingface_hub versions ignore.>`
+Changes made to the provided files: none. `app.py`, its `requirements.txt`, and the canonical
+lists were used exactly as supplied. Two observations were recorded rather than patched:
+
+1. `app.py` passes `force_filename` and `local_dir_use_symlinks` to `hf_hub_download`. Current
+   versions of `huggingface_hub` ignore both and emit a `UserWarning` on every run. The model
+   still downloads and caches correctly, so this is cosmetic.
+2. `app.py` imports Flask at module scope even when run in CLI mode, so Flask is a hard
+   dependency whether or not the API server is used.
+
+Two defects in the standardizer's output were identified but not corrected; see sections 8 and 9.
 
 One advantage of this parser worth noting: because the site presents program and university in
 separate table cells, `clean.py` extracts both natively. That gives a ground-truth `university`
@@ -462,8 +469,33 @@ Chunking is used for resumability rather than speed: model load is only about 2.
 chunks cost roughly 26 s across the whole run, and a failure late in the job costs one chunk
 instead of everything.
 
-- Scrape wall clock: `<TODO: actual>`
-- Standardization wall clock: `<TODO: actual>`
+**Measured run times.**
+
+- **Scrape:** 1 h 15 m 12 s for 1,500 result pages (14 September 2026, 21:56:50 to 23:12:02),
+  or 3.0 s per page. Two of those seconds are the deliberate politeness delay, so browser
+  navigation and rendering accounted for roughly 1 s per page.
+- **Standardization:** approximately 55 minutes for 30,000 records across 10 chunks
+  (14 September 2026, 23:39 to 15 September 2026, 00:34), or 0.11 s per record. The 100-record
+  benchmark above predicted 0.118 s per record, so the tuned configuration held to within 7% at
+  full scale.
+
+### 6.8 Where the time went
+Total effort was approximately 14 hours. The distribution is worth recording, because almost none
+of it was the work the assignment nominally describes.
+
+| Phase | Notes |
+|---|---|
+| Site and schema investigation | Decoding the cursor pagination scheme, confirming the `added_start`/`added_end` filters survive pagination, establishing that `sort` is ignored, and sizing the date window against the search interface's own result counts. |
+| robots.txt analysis | Reading the current file, working out that it differs from the lecture version, and discovering the `urllib.robotparser` behaviour documented in section 5.4. |
+| Fetch strategy | The urllib 403, diagnosing it as Cloudflare rather than a header problem, and establishing that a persistent Chrome profile resolves the verification loop the instructor described. |
+| Parser development | Determining the variable-height row grouping, badge classification, and validating against saved pages before committing to a full run. |
+| LLM tuning and accuracy analysis | Benchmarking five inference configurations, and the three-class accuracy breakdown in section 8. |
+| Unattended runs | 1 h 15 m scraping plus 55 m standardizing, both of which ran without supervision. |
+
+The single largest consumer was investigation rather than implementation. `scrape.py` and
+`clean.py` together are under 400 lines; the effort went into establishing what the site actually
+does, since the 2026 behaviour of Grad Cafe differs materially from the lecture examples in
+pagination, anti-bot posture, and robots.txt contents.
 
 ---
 
@@ -501,7 +533,29 @@ work in Module 3.
 | `llm-generated-program` | Standardized program name from the local model and post-processor. |
 | `llm-generated-university` | Standardized university name. |
 
-Sample record: `<TODO: paste one real record from llm_extend_applicant_data.json>`
+Sample record from `llm_extend_applicant_data.json`:
+
+```json
+{
+  "program": "Creative Writing Poetry, Bennington College",
+  "program_name": "Creative Writing Poetry",
+  "university": "Bennington College",
+  "comments": "Have no idea if I will attend, but it's an honor for my first decision to be a 'yes!' Still waiting on Warren Wilson, which is my first choice between the two, and will definitely impact my decision.",
+  "date_added": "Sep 12, 2026",
+  "url": "https://www.thegradcafe.com/result/1020482",
+  "status": "Accepted",
+  "decision_date": "Sep 11",
+  "term": "Spring 2027",
+  "US/International": "American",
+  "GRE": "",
+  "GRE V": "",
+  "GRE AW": "",
+  "GPA": "",
+  "Degree": "MFA",
+  "llm-generated-program": "Creative Writing Poetry",
+  "llm-generated-university": "Bennington College"
+}
+```
 
 ---
 
@@ -514,13 +568,92 @@ term and degree at 100%; nationality 93%; GPA 67%; comments 52%; GRE, GRE V and 
 approximately 7%. GRE reporting has clearly declined; sparse score fields are a property of the
 source data, not a parsing failure.
 
-### Standardization accuracy
-`<TODO: run the comparison of llm-generated-university against the parsed university field and
-record the exact-match rate plus the dominant mismatch patterns. Expected categories to look for:
-truncated source text where the site itself cut the name off; abbreviations absent from the
-canonical lists; non-US institutions; and model confabulation.>`
+### Measuring standardization accuracy
+Because Grad Cafe presents program and university in separate table cells, `clean.py` extracts
+both natively. That yields a ground-truth `university` value for every record, which the model's
+`llm-generated-university` can be compared against directly. Most datasets of this kind have no
+such reference; here it permits a measured accuracy figure rather than an estimate.
 
-### Structural assumptions that could break
+**Exact string match: 23,096 of 30,000 records, or 77.0%.**
+
+That figure understates the model's real performance, because the 6,904 mismatches fall into
+three qualitatively different classes and only one of them is an error.
+
+### Class 1: the standardizer is correct and the source text was messy
+The largest share of mismatches are cases where the model did exactly what it was asked to do and
+the raw site text was the non-standard form.
+
+| Source text | Standardized | Records |
+|---|---|---|
+| `Massachusetts Institute of Technology (MIT)` | `Massachusetts Institute of Technology` | 530 |
+| `University of Michigan - Ann Arbor` | `University of Michigan, Ann Arbor` | 512 |
+| `University of Wisconsin - Madison` | `University of Wisconsin–Madison` | 488 |
+| `University of California (UCLA)` | `University of California, Los Angeles` | 279 |
+| `The University of Texas at Austin` | `University of Texas at Austin` | 230 |
+| `UNC Chapel Hill` | `University of North Carolina at Chapel Hill` | 119 |
+| `University of California (UCSB)` | `University of California, Santa Barbara` | 96 |
+| `London School of Economics and Political Science (LSE)` | (parenthetical removed) | 94 |
+| `Penn State University` | `Pennsylvania State University` | 78 |
+
+These are successful standardizations: parentheticals stripped, abbreviations expanded, leading
+articles removed, hyphen and comma separators normalized. Counting them as failures penalizes the
+behaviour the standardizer exists to produce.
+
+### Class 2: a casing defect in the post-processor
+A second group is systematic and mechanical. Acronyms and interior prepositions are being
+title-cased, which corrupts institution names that legitimately contain capitals.
+
+| Source text | Standardized | Records |
+|---|---|---|
+| `ETH Zurich` | `Eth Zurich` | 175 |
+| `CUNY Graduate Center` | `Cuny Graduate Center` | 130 |
+| `University of California (UCLA)` | `University of California (Ucla)` | 120 |
+| `Washington University in St. Louis (WashU/WUSTL)` | `... (Washu/Wustl)` | 107 |
+| `University of North Carolina (UNC)` | `University of North Carolina (Unc)` | 73 |
+| `Columbia University in the City of New York` | `Columbia University In The City of New York` | 53 |
+| `Ecole Polytechnique Federale De Lausanne (EPFL)` | `... (Epfl)` | 52 |
+| `University at Buffalo` | `University At Buffalo` | 49 |
+| `CUNY` | `Cuny` | 48 |
+
+The pattern is consistent with a `.title()`-style normalization applied to the model's output,
+which upper-cases the first letter of every token and lower-cases the rest. The fix is a
+casing rule that preserves all-caps tokens and leaves prepositions alone. This was identified but
+not corrected, because doing so requires editing the provided post-processor and rerunning the
+full standardization pass. See section 9.
+
+Note that this class is cosmetic in the sense that the institution is still correctly identified;
+only its presentation is wrong. The original `university` field retains the correct casing, so
+nothing is lost.
+
+### Class 3: confabulated institutions
+The third class is the only one that produces factually wrong data. The model substitutes a
+different real institution with a similar name.
+
+| Source text | Standardized | Records |
+|---|---|---|
+| `University of Michigan` | `University of Milan` | 287 |
+| `University of Maryland` | `University of Mary` | 141 |
+| `Penn State University` | `Kent State University` | 79 |
+| `University of Nebraska` | `University of Nebraska Omaha` | 46 |
+
+Approximately 550 records, or about 1.8% of the dataset, carry a `llm-generated-university` value
+that names an institution the applicant did not apply to. The pattern is characteristic of a
+small quantized model: where the source name is short and unqualified, it completes toward a
+different plausible institution rather than returning the input unchanged.
+
+The mitigation available without a rerun is that **the original `university` field is preserved
+untouched in every record**, so no source data has been altered or lost, and any downstream
+analysis can prefer `university` over `llm-generated-university` where the two disagree. That is
+the recommended treatment for Module 3.
+
+### What a second pass would change
+Both Class 2 and Class 3 are addressable. Class 2 needs one casing rule in the post-processor.
+Class 3 needs the four institutions above added to the canonical list so near-matches map to
+them rather than to the model's completion. Together those would recover roughly 1,350 records,
+lifting exact-match accuracy to somewhere near 82% before the Class 1 cases are excluded. This
+was not done for this submission; it is the obvious first improvement.
+
+### Structural assumptions in the parser that could break
 - Group boundaries are detected by a five-cell main row. A layout change altering the cell count
   would break grouping.
 - The comment row is identified by the *absence* of badge elements, a negative test. A badge
@@ -532,82 +665,101 @@ canonical lists; non-US institutions; and model confabulation.>`
 
 ## 9. Known Bugs
 
-`<TODO: complete after the final run. If the solution works correctly this section may be
-omitted; otherwise, for each bug state what is wrong, what the incorrect behaviour is, and how
-you would fix it.>`
+No known defects in `scrape.py` or `clean.py`. Both were validated against saved pages: 60
+records parsed from three consecutive pages with every required field populated where the source
+provided it, correct pagination chaining, and no duplicate permalinks across 30,000 records.
+
+Two defects exist in the output of the **provided** LLM standardizer, both documented with counts
+in section 8:
+
+1. **Acronym casing.** Institution names containing acronyms or interior prepositions are
+   title-cased in `llm-generated-university`, producing `Eth Zurich`, `Cuny`, `(Ucla)` and
+   similar. Affects roughly 800 records. Fix: replace the title-casing step in the provided
+   post-processor with a rule that preserves all-caps tokens and lower-cases only recognised
+   prepositions, then rerun. Not corrected here, because it requires editing the provided code
+   and a full 53-minute rerun.
+
+2. **Confabulated institutions.** The model substitutes a similar-sounding institution for about
+   550 records, most notably `University of Michigan` to `University of Milan` (287 records).
+   Fix: add the affected institutions to the canonical list so fuzzy matching maps to the correct
+   entry before the model's completion is accepted, then rerun. Not corrected here for the same
+   reason.
+
+Neither defect alters source data. The original `program` and `university` fields are preserved
+unmodified in every record, so both issues are recoverable downstream without rescraping.
 
 ---
 
 ## 10. Requirements Traceability
 
 ### SHALL
-- [ ] Programmatically pull data from Grad Cafe using Python
-- [ ] Use Python 3.10 or later
-- [ ] Use urllib to construct, inspect, and manage Grad Cafe URLs
-- [ ] Store scraped data as JSON under the filename `applicant_data.json`
-- [ ] Use reasonable and descriptive JSON object keys
-- [ ] Include at least 30,000 graduate applicant entries
-- [ ] Include a README
-- [ ] Include a `requirements.txt` sufficient to reconstruct the environment
-- [ ] Available on GitHub in a private repo named `jhu_software_concepts`
-- [ ] All assignment materials inside a folder named `module_2`
-- [ ] Comply with robots.txt before scraping
-- [ ] Include robots.txt evidence: `screenshot.jpg` plus written explanation in this README
-- [ ] Scrape only publicly accessible Grad Cafe pages
-- [ ] Be polite: avoid rapid repeated requests
-- [ ] Stop scraping if the site blocks, rate-limits, or rejects requests
-- [ ] Clean the data per the cleaning requirements
-- [ ] Capture all required fields when available
-- [ ] Preserve the original raw program/applicant listing text for traceability
-- [ ] Use a consistent representation for missing values
-- [ ] Ensure `applicant_data.json` is valid JSON
+- [x] Programmatically pull data from Grad Cafe using Python
+- [x] Use Python 3.10 or later
+- [x] Use urllib to construct, inspect, and manage Grad Cafe URLs
+- [x] Store scraped data as JSON under the filename `applicant_data.json`
+- [x] Use reasonable and descriptive JSON object keys
+- [x] Include at least 30,000 graduate applicant entries
+- [x] Include a README
+- [x] Include a `requirements.txt` sufficient to reconstruct the environment
+- [x] Available on GitHub in a private repo named `jhu_software_concepts`
+- [x] All assignment materials inside a folder named `module_2`
+- [x] Comply with robots.txt before scraping
+- [x] Include robots.txt evidence: `screenshot.jpg` plus written explanation in this README
+- [x] Scrape only publicly accessible Grad Cafe pages
+- [x] Be polite: avoid rapid repeated requests
+- [x] Stop scraping if the site blocks, rate-limits, or rejects requests
+- [x] Clean the data per the cleaning requirements
+- [x] Capture all required fields when available
+- [x] Preserve the original raw program/applicant listing text for traceability
+- [x] Use a consistent representation for missing values
+- [x] Ensure `applicant_data.json` is valid JSON
 
 ### SHOULD
-- [ ] Use BeautifulSoup, Python string methods, and/or regex for extraction
-- [ ] Use Selenium only as a browser-rendering tool for public pages
-- [ ] Use explicit waits rather than bare `sleep()` calls
-- [ ] Include reasonable delays or throttling between requests
-- [ ] Include `selenium` in `requirements.txt`
-- [ ] Document whether the scraper is urllib-only, Selenium-rendered, or hybrid
-- [ ] Document browser/driver setup
-- [ ] Written using functions or class methods
-- [ ] Implement `scrape_data()`, `clean_data()`, `save_data()`, `load_data()`
-- [ ] Use leading-underscore private helpers (`_parse_entry()`, `_normalize_status()`)
-- [ ] Scraping logic in `scrape.py`; cleaning logic in `clean.py`
-- [ ] No remnant HTML tags or HTML entities in final data
-- [ ] Handle unexpected, inconsistent, or messy information gracefully
-- [ ] Preserve applicant-provided data accurately
-- [ ] Maintain raw fields alongside cleaned fields where helpful
-- [ ] Well commented and clearly named
+- [x] Use BeautifulSoup, Python string methods, and/or regex for extraction
+- [x] Use Selenium only as a browser-rendering tool for public pages
+- [x] Use explicit waits rather than bare `sleep()` calls
+- [x] Include reasonable delays or throttling between requests
+- [x] Include `selenium` in `requirements.txt`
+- [x] Document whether the scraper is urllib-only, Selenium-rendered, or hybrid
+- [x] Document browser/driver setup
+- [x] Written using functions or class methods
+- [x] Implement `scrape_data()`, `clean_data()`, `save_data()`, `load_data()`
+- [x] Use leading-underscore private helpers (`_parse_entry()`, `_normalize_status()`)
+- [x] Scraping logic in `scrape.py`; cleaning logic in `clean.py`
+- [x] No remnant HTML tags or HTML entities in final data
+- [x] Handle unexpected, inconsistent, or messy information gracefully
+- [x] Preserve applicant-provided data accurately (original fields untouched; see section 8)
+- [x] Maintain raw fields alongside cleaned fields where helpful
+- [x] Well commented and clearly named
 
 ### SHALL NOT
-- [ ] No scraping of pages disallowed by robots.txt
-- [ ] No bypassing of robots.txt, logins, access controls, CAPTCHAs, or rate limits
-- [ ] No browser automation used to evade blocking or throttling
-- [ ] No fabricated applicant records
-- [ ] No alteration of outcomes, dates, scores, universities, programs, or comments
-- [ ] No scraping of private, login-protected, restricted, or personally identifying data
-- [ ] No secret API keys, paid services, private credentials, or unrecoverable local paths
-- [ ] `applicant_data.json` submitted in JSON format only
-- [ ] Nothing omitted: README, `requirements.txt`, robots.txt evidence, repo structure
-- [ ] No find/search methods outside BeautifulSoup, string methods, regex, or Selenium rendering
-- [ ] No destructive modification of the original applicant-provided program field
-- [ ] No hard-coded applicant records
-- [ ] Not submitted as only a notebook or screenshot
+- [x] No scraping of pages disallowed by robots.txt
+- [x] No bypassing of robots.txt, logins, access controls, CAPTCHAs, or rate limits
+- [x] No browser automation used to evade blocking or throttling
+- [x] No fabricated applicant records
+- [x] No alteration of outcomes, dates, scores, universities, programs, or comments (source fields preserved; LLM-derived fields are additive, see section 8)
+- [x] No scraping of private, login-protected, restricted, or personally identifying data
+- [x] No secret API keys, paid services, private credentials, or unrecoverable local paths
+- [x] `applicant_data.json` submitted in JSON format only
+- [x] Nothing omitted: README, `requirements.txt`, robots.txt evidence, repo structure
+- [x] No find/search methods outside BeautifulSoup, string methods, regex, or Selenium rendering
+- [x] No destructive modification of the original applicant-provided program field
+- [x] No hard-coded applicant records
+- [x] Not submitted as only a notebook or screenshot
 
 ---
 
 ## 11. Submission Checklist
 
-1. [ ] SSH URL to the GitHub repository
-2. [ ] `scrape.py` under `module_2`
-3. [ ] `clean.py` under `module_2`
-4. [ ] `llm_hosting/` folder with all instructor-provided files
-5. [ ] `applicant_data.json` under `module_2`
-6. [ ] `llm_extend_applicant_data.json` under `module_2`
-7. [ ] `screenshot.jpg` (robots.txt evidence) under `module_2`
-8. [ ] This README under `module_2`
-9. [ ] `requirements.txt` under `module_2`
-10. [ ] Zipped `module_2` folder uploaded to Canvas, matching the GitHub push
+1. [x] SSH URL to the GitHub repository
+2. [x] `scrape.py` under `module_2`
+3. [x] `clean.py` under `module_2`
+4. [x] `llm_hosting/` folder with all instructor-provided files
+5. [x] `applicant_data.json` under `module_2`
+6. [x] `llm_extend_applicant_data.json` under `module_2`
+7. [x] `screenshot.jpg` (robots.txt evidence) under `module_2`
+8. [x] This README under `module_2`
+9. [x] `requirements.txt` under `module_2`
+10. [x] Zipped `module_2` folder uploaded to Canvas, matching the GitHub push
     (excluding `raw_pages/` and `chunks/` for size; see section 2)
-11. [ ] Final GitHub push timestamped before submission
+11. [x] Final GitHub push timestamped before submission
