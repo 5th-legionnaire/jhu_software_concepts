@@ -246,6 +246,14 @@ def uq2(session):
             for d, nat, n, a, p in session.execute(uq2_stmt())]
 
 
+def dataset_summary(session):
+    """Total entries and the range of date_added, for the page header."""
+    total, first, last = session.execute(
+        select(func.count(), func.min(Applicant.date_added), func.max(Applicant.date_added))
+        .select_from(Applicant)).one()
+    return {"total": total, "first_added": first, "last_added": last}
+
+
 def all_results(session):
     """Every question's result, for the Flask analysis page."""
     return {name: fn(session) for name, fn in (
