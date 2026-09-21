@@ -1,0 +1,34 @@
+# EN 605.256 Module 2 — Web Scraping
+# Joshua Latz (jlatz1)
+#
+# Python 3.14.6
+#
+# Install with:
+#     pip install -r requirements.txt
+#
+# The LLM standardizer under llm_hosting/ has its own requirements.txt and is
+# installed separately.
+
+# HTML parsing for the saved result pages (clean.py).
+beautifulsoup4==4.15.0
+
+# Renders Grad Cafe pages in a real Chrome browser. A plain urllib request to
+# the survey page returns HTTP 403 because the site sits behind Cloudflare, so
+# Selenium is used as a page renderer only. Selenium Manager resolves
+# ChromeDriver automatically; no separate driver install is needed.
+selenium==4.49.0
+
+# HTTP client. Pulled in by Selenium, pinned here because the assignment
+# specifies it. URL construction and inspection in scrape.py use the standard
+# library urllib.parse module, which needs no installation.
+urllib3==2.7.0
+
+# CSS selector engine used internally by BeautifulSoup. Listed explicitly so
+# the environment can be reconstructed exactly.
+soupsieve==2.9.2
+
+# psycopg2 needs a local PostgreSQL install to build against (load_data.py).
+psycopg2-binary==2.9.10
+
+# Loads DB credentials from .env (gitignored) instead of hardcoding them.
+python-dotenv==1.0.1

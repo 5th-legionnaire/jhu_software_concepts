@@ -20,6 +20,9 @@ sample_*.json
 *.json.log
 log_*.txt
 
+# Environment variables / secrets
+.env
+
 # macOS
 .DS_Store
 
