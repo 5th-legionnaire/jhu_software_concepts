@@ -1,0 +1,94 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Grad Café admissions analysis</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@400;600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&display=swap">
+  <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+  <main class="page">
+    <header class="masthead">
+      <div class="masthead-text">
+        <h1>Grad Café admissions, as posted</h1>
+        {% if summary and summary.total %}
+        <p class="dek">
+          Analysis of {{ total_text }} self-reported results added to Grad Café between
+          {{ summary.first_added.strftime('%B %-d, %Y') }} and
+          {{ summary.last_added.strftime('%B %-d, %Y') }}, read live from PostgreSQL.
+        </p>
+        {% endif %}
+      </div>
+      <div class="actions">
+        {# Part 9 (Pull Data) and Part 10 (Update Analysis) controls go here. #}
+      </div>
+    </header>
+
+    {% if error %}
+    <section class="notice notice-error" role="alert">
+      <p>{{ error }}</p>
+    </section>
+    {% elif not summary.total %}
+    <section class="notice" role="status">
+      <p>The database has no entries yet. Run <code>python3 load_data.py</code> to load the
+         Module 2 data, then reload this page.</p>
+    </section>
+    {% else %}
+
+    <aside class="legend">
+      <span class="legend-bar" aria-hidden="true"><span style="width: 62%"></span></span>
+      <p>
+        Each bar shows how many of the {{ total_text }} entries an answer rests on.
+        Amber marks answers resting on less than {{ thin_pct }}% of the data, where a
+        handful of posts can move the result.
+      </p>
+    </aside>
+
+    {% for section in sections %}
+    <section class="group" aria-labelledby="group-{{ loop.index }}">
+      <h2 id="group-{{ loop.index }}">{{ section.title }}</h2>
+      <ol class="questions">
+        {% for item in section["items"] %}
+        <li class="question">
+          <span class="number" aria-hidden="true">{{ item.number }}</span>
+          <div class="body">
+            <h3>{{ item.question }}</h3>
+            <dl class="answers">
+              {% for row in item.rows %}
+              <div class="answer{% if row.thin %} is-thin{% endif %}">
+                <dt>{{ row.label }}</dt>
+                <dd class="value">{{ row.value }}</dd>
+                {% if row.n is not none %}
+                <dd class="basis">
+                  <span class="bar" role="img"
+                        aria-label="{{ row.n_text }}, {{ row.share_pct }}% of the dataset">
+                    <span style="width: {{ [row.share_pct, 0.6] | max }}%"></span>
+                  </span>
+                  <span class="basis-text">{{ row.basis }}</span>
+                </dd>
+                {% elif row.basis %}
+                <dd class="basis"><span class="basis-text">{{ row.basis }}</span></dd>
+                {% endif %}
+              </div>
+              {% endfor %}
+            </dl>
+          </div>
+        </li>
+        {% endfor %}
+      </ol>
+    </section>
+    {% endfor %}
+    {% endif %}
+
+    <footer class="colophon">
+      <p>EN 605.256 Modern Software Concepts in Python, Module 3. Joshua Latz (jlatz1).
+         Averages include only values on each metric's own scale; see the README for the
+         validity ranges and how they were chosen.</p>
+    </footer>
+  </main>
+</body>
+</html>

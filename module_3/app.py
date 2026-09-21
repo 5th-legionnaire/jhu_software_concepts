@@ -1,0 +1,165 @@
+"""
+app.py: Flask application that displays the Module 3 analysis.
+
+EN 605.256 Modern Software Concepts in Python, Module 3.
+Joshua Latz (jlatz1)
+
+Contains:
+    create_app():      application factory
+    build_sections():  turns ORM results into display-ready sections
+    index():           the analysis page (route "/")
+
+Every database read goes through the SQLAlchemy Applicant model, via the
+functions in orm_queries.py; no query logic is duplicated in the routes.
+Results are read on every request, so the page always reflects the current
+contents of PostgreSQL.
+
+Usage:
+    python3 app.py      # then open http://127.0.0.1:8080
+"""
+
+import os
+
+from flask import Flask, render_template
+from sqlalchemy.exc import SQLAlchemyError
+
+from models import get_session
+from orm_queries import all_results, dataset_summary
+from query_data import fmt_avg, fmt_count, fmt_diff, fmt_pct
+
+# Answers resting on less than this share of the dataset are flagged as thin.
+THIN_SHARE = 0.05
+
+
+def _row(label, value, n=None, detail=None):
+    """One displayed answer: a label, its formatted value, and the entries behind it."""
+    return {"label": label, "value": value, "n": n, "detail": detail}
+
+
+def _with_shares(sections, total):
+    """Attach each row's share of the dataset, used for the sample-size bar."""
+    for section in sections:
+        for item in section["items"]:
+            for row in item["rows"]:
+                if row["n"] is not None and total:
+                    share = row["n"] / total
+                    row["share_pct"] = round(100 * share, 1)
+                    row["thin"] = share < THIN_SHARE
+                    row["n_text"] = f"{fmt_count(row['n'])} entries"
+                # The line under the bar: the detail when there is one (details state
+                # their own counts), otherwise just the number of entries.
+                row["basis"] = row["detail"] or row.get("n_text")
+    return sections
+
+
+def build_sections(r, total):
+    """Arrange every question's ORM result into the page's two sections."""
+    q3 = r["q3"]
+    required = [
+        {"number": "1",
+         "question": "How many entries are from applicants who applied for Fall 2026?",
+         "rows": [_row("Fall 2026 applicant count", fmt_count(r["q1"]["count"]), r["q1"]["count"])]},
+        {"number": "2",
+         "question": "Among entries that provide a nationality classification, what percentage "
+                     "are international students?",
+         "rows": [_row("Percent international", fmt_pct(r["q2"]["pct"]), r["q2"]["classified"],
+                       f"{fmt_count(r['q2']['international'])} international of "
+                       f"{fmt_count(r['q2']['classified'])} entries with a nationality")]},
+        {"number": "3",
+         "question": "What are the average GPA, GRE Quantitative, GRE Verbal, and GRE Analytical "
+                     "Writing scores of applicants who provide each metric?",
+         "rows": [
+             _row("Average GPA", fmt_avg(q3["avg_gpa"]), q3["n_gpa"],
+                  f"{fmt_count(q3['n_gpa'])} entries; "
+                  f"{fmt_count(q3['x_gpa'])} off-scale values excluded"),
+             _row("Average GRE Quantitative", fmt_avg(q3["avg_gre_q"]), q3["n_gre_q"],
+                  f"{fmt_count(q3['n_gre_q'])} entries; {fmt_count(q3['x_gre_q'])} excluded, "
+                  "most of them combined scores entered in the quantitative field"),
+             _row("Average GRE Verbal", fmt_avg(q3["avg_gre_v"]), q3["n_gre_v"],
+                  f"{fmt_count(q3['n_gre_v'])} entries; "
+                  f"{fmt_count(q3['x_gre_v'])} off-scale values excluded"),
+             _row("Average GRE Analytical Writing", fmt_avg(q3["avg_gre_aw"]), q3["n_gre_aw"],
+                  f"{fmt_count(q3['n_gre_aw'])} entries; "
+                  f"{fmt_count(q3['x_gre_aw'])} off-scale values excluded"),
+         ]},
+        {"number": "4",
+         "question": "What is the average GPA of American applicants who applied for Fall 2026?",
+         "rows": [_row("Average GPA, American, Fall 2026", fmt_avg(r["q4"]["avg_gpa"]), r["q4"]["n"])]},
+        {"number": "5",
+         "question": "What percentage of Fall 2025 entries are acceptances?",
+         "rows": [_row("Fall 2025 acceptance percentage", fmt_pct(r["q5"]["pct"]), r["q5"]["total"],
+                       f"{fmt_count(r['q5']['accepted'])} accepted of "
+                       f"{fmt_count(r['q5']['total'])} Fall 2025 entries, all posted after "
+                       "that cycle had largely finished")]},
+        {"number": "6",
+         "question": "What is the average GPA of accepted applicants who applied for Fall 2026?",
+         "rows": [_row("Average GPA, accepted, Fall 2026", fmt_avg(r["q6"]["avg_gpa"]), r["q6"]["n"])]},
+        {"number": "7",
+         "question": "How many entries are from applicants who applied to Johns Hopkins University "
+                     "for a master's degree in Computer Science?",
+         "rows": [_row("JHU Masters in Computer Science", fmt_count(r["q7"]["count"]), r["q7"]["count"])]},
+        {"number": "8",
+         "question": "How many Fall 2026 entries are acceptances for a PhD in Computer Science at "
+                     "Georgetown, MIT, Stanford, or Carnegie Mellon, using the original fields?",
+         "rows": [_row("Original-field count", fmt_count(r["q9"]["original"]), r["q9"]["original"])]},
+        {"number": "9",
+         "question": "Repeating Question 8 with the LLM-generated university and program fields, "
+                     "how does the count compare?",
+         "rows": [
+             _row("Original-field count", fmt_count(r["q9"]["original"]), r["q9"]["original"]),
+             _row("LLM-field count", fmt_count(r["q9"]["llm"]), r["q9"]["llm"]),
+             _row("Difference", fmt_diff(r["q9"]["difference"])),
+         ]},
+    ]
+    user = [
+        {"number": "UQ1",
+         "question": "Among Fall 2026 entries, do applicants who report a usable GPA post "
+                     "acceptances at a different rate from applicants who do not?",
+         "rows": [_row(g["group"], fmt_pct(g["pct"]), g["entries"],
+                       f"{fmt_count(g['accepted'])} accepted of {fmt_count(g['entries'])} entries")
+                  for g in r["uq1"]]},
+        {"number": "UQ2",
+         "question": "How do Fall 2026 acceptance rates differ between American and International "
+                     "applicants, for PhD and Masters programs?",
+         "rows": [_row(f"{g['degree']}, {g['nationality']}", fmt_pct(g["pct"]), g["entries"],
+                       f"{fmt_count(g['accepted'])} accepted of {fmt_count(g['entries'])} entries")
+                  for g in r["uq2"]]},
+    ]
+    return _with_shares([
+        {"title": "Required questions", "items": required},
+        {"title": "User questions", "items": user},
+    ], total)
+
+
+def create_app():
+    """Build and configure the Flask application."""
+    app = Flask(__name__)
+
+    @app.route("/")
+    def index():
+        try:
+            with get_session() as session:
+                summary = dataset_summary(session)
+                results = all_results(session)
+        except SQLAlchemyError:
+            app.logger.exception("Analysis query failed")
+            return render_template(
+                "index.html",
+                error="The database could not be reached. Check that PostgreSQL is running "
+                      "and that the connection settings in .env are correct, then reload "
+                      "this page.",
+            ), 503
+        return render_template(
+            "index.html",
+            summary=summary,
+            total_text=fmt_count(summary["total"]),
+            thin_pct=int(THIN_SHARE * 100),
+            sections=build_sections(results, summary["total"]),
+        )
+
+    return app
+
+
+if __name__ == "__main__":
+    # Port 8080 rather than Flask's default 5000, which macOS's AirPlay Receiver occupies.
+    create_app().run(host="127.0.0.1", port=int(os.environ.get("PORT", "8080")), debug=False)
