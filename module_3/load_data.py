@@ -1,7 +1,7 @@
 """
 load_data.py: This program takes the cleaned applicant data
 produced in Module 2 and loads it into a PostgreSQL database
-(you may reuse existing functionality / move around content from clean.py and scrape.py).
+(it may reuse existing functionality / move around content from clean.py and scrape.py).
 
 EN 605.256 Modern Software Concepts in Python, Module 3.
 Joshua Latz (jlatz1)
@@ -22,9 +22,8 @@ import re
 import sys
 from datetime import datetime
 
-import psycopg2
-from psycopg2 import OperationalError, sql
-from psycopg2.extras import execute_batch
+import psycopg
+from psycopg import OperationalError, sql
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -50,15 +49,23 @@ def get_db_config():
 
 
 def create_connection(config):
-    """Create a database connection to a config-defined PostgreSQL database."""
+    """Create a database connection to a config-defined PostgreSQL database.
+
+    The connection runs in autocommit mode, and every write is wrapped in an
+    explicit connection.transaction() block. In psycopg 3 that is the
+    reliable way to get real BEGIN/COMMIT boundaries: without autocommit, a
+    plain read opens an implicit transaction and a later transaction() block
+    becomes a savepoint inside it rather than committing.
+    """
     connection = None
     try:
-        connection = psycopg2.connect(
-            database=config["dbname"],
+        connection = psycopg.connect(
+            dbname=config["dbname"],
             user=config["user"],
             password=config["password"],
             host=config["host"],
             port=config["port"],
+            autocommit=True,
         )
         print("Connection to PostgreSQL DB successful")
     except OperationalError as e:
@@ -69,15 +76,17 @@ def create_connection(config):
 def execute_query(connection, query, params=None):
     """Execute a single query on the given database connection.
 
-    `with connection` commits on success and rolls back on error. The
-    error is re-raised rather than swallowed, so a failed CREATE TABLE
-    stops the run instead of surfacing later as a confusing insert error.
+    connection.transaction() commits on success and rolls back on error.
+    (In psycopg 3, `with connection:` would close the connection on exit,
+    which is not what is wanted here.) The error is re-raised rather than
+    swallowed, so a failed CREATE TABLE stops the run instead of surfacing
+    later as a confusing insert error.
     """
     try:
-        with connection:
+        with connection.transaction():
             with connection.cursor() as cursor:
                 cursor.execute(query, params)
-    except psycopg2.Error as e:
+    except psycopg.Error as e:
         print(f"The error '{e}' occurred")
         raise
 
@@ -100,7 +109,12 @@ CREATE TABLE IF NOT EXISTS applicants (
     gre_aw                    FLOAT,
     degree                    TEXT,
     llm_generated_program     TEXT,
-    llm_generated_university  TEXT
+    llm_generated_university  TEXT,
+    -- Additional columns, not in the assignment schema. Carried over from
+    -- Module 2 so no parsed field is dropped on the way into the database.
+    program_name              TEXT,
+    university                TEXT,
+    decision_date             TEXT
 );
 """
 
@@ -122,6 +136,10 @@ COLUMN_DESCRIPTIONS = {
     "degree": "Degree type",
     "llm_generated_program": "LLM-generated department/program",
     "llm_generated_university": "LLM-generated university",
+    # Additional columns (descriptions are ours, not from the assignment).
+    "program_name": "Program name alone, as presented by the site",
+    "university": "University name alone, as presented by the site",
+    "decision_date": "Date the decision was given, as presented by the site (no year)",
 }
 
 # Named placeholders so the loader can pass one dict per record.
@@ -130,15 +148,18 @@ INSERT_APPLICANT = """
 INSERT INTO applicants (
     p_id, program, comments, date_added, url, status, term,
     us_or_international, gpa, gre, gre_v, gre_aw, degree,
-    llm_generated_program, llm_generated_university
+    llm_generated_program, llm_generated_university,
+    program_name, university, decision_date
 ) VALUES (
     %(p_id)s, %(program)s, %(comments)s, %(date_added)s, %(url)s,
     %(status)s, %(term)s, %(us_or_international)s, %(gpa)s, %(gre)s,
     %(gre_v)s, %(gre_aw)s, %(degree)s, %(llm_generated_program)s,
-    %(llm_generated_university)s
+    %(llm_generated_university)s,
+    %(program_name)s, %(university)s, %(decision_date)s
 )
 ON CONFLICT (p_id) DO NOTHING;
 """
+
 
 def create_table(connection):
     """Create the applicants table and attach each column's description.
@@ -146,7 +167,7 @@ def create_table(connection):
     Safe to run repeatedly: CREATE TABLE IF NOT EXISTS is a no-op on an
     existing table, and COMMENT ON simply overwrites. COMMENT ON cannot
     take bind parameters, so identifier and text are composed with
-    psycopg2.sql rather than string formatting.
+    psycopg.sql rather than string formatting.
     """
     execute_query(connection, CREATE_APPLICANTS_TABLE)
     for column, description in COLUMN_DESCRIPTIONS.items():
@@ -228,18 +249,19 @@ def _prepare_record(record):
         "degree": _blank_to_none(record.get("Degree")),
         "llm_generated_program": _blank_to_none(record.get("llm-generated-program")),
         "llm_generated_university": _blank_to_none(record.get("llm-generated-university")),
+        "program_name": _blank_to_none(record.get("program_name")),
+        "university": _blank_to_none(record.get("university")),
+        "decision_date": _blank_to_none(record.get("decision_date")),
     }
 
 
 def _read_records(path):
-    """Read records from a JSON array file, falling back to JSON Lines."""
+    """Read the Module 2 output: a JSON array of applicant records."""
     with open(path, encoding="utf-8") as handle:
-        text = handle.read()
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError:
-        return [json.loads(line) for line in text.splitlines() if line.strip()]
-    return data if isinstance(data, list) else [data]
+        data = json.load(handle)
+    if not isinstance(data, list):
+        raise ValueError(f"{path}: expected a JSON array of records")
+    return data
 
 
 def _count_rows(connection):
@@ -255,7 +277,8 @@ def load_data(connection, path=DEFAULT_DATA_FILE):
     """Read records back from a JSON file and load them into a PostgreSQL database.
 
     All inserts run in one transaction: either the whole file loads or
-    nothing does. Returns the number of rows newly inserted, which is 0
+    nothing does. psycopg 3's executemany() pipelines the statements, so
+    30,000 rows need no manual batching. Returns the number of rows newly inserted, which is 0
     on a rerun against an already-loaded table.
     """
     records = _read_records(path)
@@ -269,9 +292,9 @@ def load_data(connection, path=DEFAULT_DATA_FILE):
         rows.append(row)
 
     before = _count_rows(connection)
-    with connection:
+    with connection.transaction():
         with connection.cursor() as cursor:
-            execute_batch(cursor, INSERT_APPLICANT, rows, page_size=1000)
+            cursor.executemany(INSERT_APPLICANT, rows)
     inserted = _count_rows(connection) - before
 
     print(

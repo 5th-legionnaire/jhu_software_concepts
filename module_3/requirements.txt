@@ -1,4 +1,4 @@
-# EN 605.256 Module 2 — Web Scraping
+# EN 605.256 Module 3: Database Queries, SQLAlchemy, and Dynamic Webpages
 # Joshua Latz (jlatz1)
 #
 # Python 3.14.6
@@ -6,8 +6,12 @@
 # Install with:
 #     pip install -r requirements.txt
 #
-# The LLM standardizer under llm_hosting/ has its own requirements.txt and is
+# One environment covers the loader, the raw SQL and ORM queries, the Flask
+# application, and the Module 2 scraper that Pull Data invokes. The LLM
+# standardizer under llm_hosting/ has its own requirements.txt and is
 # installed separately.
+
+# Module 2 scraper, carried over for Pull Data
 
 # HTML parsing for the saved result pages (clean.py).
 beautifulsoup4==4.15.0
@@ -27,8 +31,25 @@ urllib3==2.7.0
 # the environment can be reconstructed exactly.
 soupsieve==2.9.2
 
-# psycopg2 needs a local PostgreSQL install to build against (load_data.py).
-psycopg2-binary==2.9.10
+# Database
+
+# PostgreSQL driver (psycopg 3) for load_data.py and query_data.py, and the
+# driver SQLAlchemy uses underneath (postgresql+psycopg). The PyPI package is
+# named "psycopg"; "psycopg2" is the previous major version. The [binary]
+# extra installs psycopg-binary, which bundles libpq, so no local PostgreSQL
+# headers or compiler are needed. Prebuilt wheels exist for CPython 3.14 on
+# Apple silicon.
+psycopg[binary]==3.3.6
 
 # Loads DB credentials from .env (gitignored) instead of hardcoding them.
 python-dotenv==1.0.1
+
+# ORM for models.py and orm_queries.py, and for the Flask app's database
+# reads. The assignment specifies SQLAlchemy 2.x.
+SQLAlchemy==2.0.54
+
+# Web application
+
+# Serves the analysis page with the Pull Data and Update Analysis buttons
+# (app.py).
+Flask==3.1.3
