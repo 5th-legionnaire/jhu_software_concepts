@@ -24,7 +24,12 @@
         {% endif %}
       </div>
       <div class="actions">
-        {# Part 9 (Pull Data) and Part 10 (Update Analysis) controls go here. #}
+        <form method="post" action="{{ url_for('update') }}">
+          <button type="submit" class="button button-quiet">Update Analysis</button>
+        </form>
+        {% if queried_text %}
+        <p class="as-of">Results as of {{ queried_text }}</p>
+        {% endif %}
       </div>
     </header>
 

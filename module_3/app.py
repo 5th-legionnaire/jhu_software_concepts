@@ -9,6 +9,7 @@ Contains:
     build_sections():  turns ORM results into display-ready sections
     index():           the analysis page (route "/")
     pull():            Pull Data (route "/pull-data", POST), which starts pull_data.py
+    update():          Update Analysis (route "/update-analysis", POST), which re-queries
 
 Every database read goes through the SQLAlchemy Applicant model, via the
 functions in orm_queries.py; no query logic is duplicated in the routes.
@@ -19,6 +20,11 @@ Pull Data runs pull_data.py as a subprocess, so a pull that takes minutes
 never blocks the page. The app keeps the subprocess handle and will not start
 another pull while that one is still running.
 
+Update Analysis re-reads every result from PostgreSQL and never starts a
+scrape. It is safe during a pull, because the loader commits in a single
+transaction: a read sees the database either before or after the new
+entries, never halfway.
+
 Usage:
     python3 app.py      # then open http://127.0.0.1:8080
 """
@@ -26,8 +32,9 @@ Usage:
 import os
 import subprocess
 import sys
+from datetime import datetime
 
-from flask import Flask, flash, redirect, render_template, url_for
+from flask import Flask, flash, redirect, render_template, session, url_for
 from sqlalchemy.exc import SQLAlchemyError
 
 from models import get_session
@@ -191,13 +198,41 @@ def create_app():
               "The results below still show the data from before this pull.", "info")
         return redirect(url_for("index"))
 
+    @app.post("/update-analysis")
+    def update():
+        """Re-query the database for the latest results. Never starts a scrape."""
+        try:
+            with get_session() as db:
+                total = dataset_summary(db)["total"]
+        except SQLAlchemyError:
+            flash("The analysis could not be updated because the database could not be "
+                  "reached. Check that PostgreSQL is running, then try again.", "warning")
+            return redirect(url_for("index"))
+
+        previous = session.get("shown_total")
+        if previous is None or total == previous:
+            change = f"The database holds {fmt_count(total)} entries, the same as before."
+        else:
+            change = (f"The database now holds {fmt_count(total)} entries, "
+                      f"{fmt_count(total - previous)} more than before.")
+
+        if pull_running():
+            flash("New data is currently being retrieved by Pull Data, so these results may "
+                  "not include it yet. The pull was left running. " + change + " Click Update "
+                  "Analysis again after the pull finishes to include its new entries.",
+                  "warning")
+        else:
+            flash("Analysis updated with the latest data in the database. " + change, "info")
+        # The redirect re-renders the page, which re-runs every query.
+        return redirect(url_for("index"))
+
     @app.route("/")
     def index():
         running, status = pull_running(), pull_status()
         try:
-            with get_session() as session:
-                summary = dataset_summary(session)
-                results = all_results(session)
+            with get_session() as db:
+                summary = dataset_summary(db)
+                results = all_results(db)
         except SQLAlchemyError:
             app.logger.exception("Analysis query failed")
             return render_template(
@@ -207,9 +242,11 @@ def create_app():
                       "this page.",
                 pull_running=running, pull_status=status,
             ), 503
+        session["shown_total"] = summary["total"]
         return render_template(
             "index.html",
             summary=summary,
+            queried_text=datetime.now().strftime("%-I:%M:%S %p"),
             total_text=fmt_count(summary["total"]),
             thin_pct=int(THIN_SHARE * 100),
             sections=build_sections(results, summary["total"]),
