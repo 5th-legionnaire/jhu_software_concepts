@@ -1,0 +1,39 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyc
+
+# Virtual environments
+venv/
+.venv/
+
+# Local model weights (downloaded on first run, ~650MB)
+*.gguf
+**/llm_hosting/models/
+.cache/
+
+# Scraper working files
+raw_pages/
+chunks/
+chunk_*.json
+sample_*.json
+*.json.out
+*.json.log
+log_*.txt
+
+# Environment variables / secrets
+.env
+
+# macOS
+.DS_Store
+
+# Office temp/lock files
+~$*.doc
+~$*.docx
+~$*.xls
+~$*.xlsx
+~$*.ppt
+~$*.pptx
+
+.pull_data.lock
+pull_work/
