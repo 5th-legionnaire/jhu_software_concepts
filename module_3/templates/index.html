@@ -28,6 +28,31 @@
       </div>
     </header>
 
+    {% with notices = get_flashed_messages(with_categories=true) %}
+    {% for category, text in notices %}
+    <p class="flash flash-{{ category }}" role="status">{{ text }}</p>
+    {% endfor %}
+    {% endwith %}
+
+    <section class="pull" aria-labelledby="pull-heading">
+      <div class="pull-text">
+        <h2 id="pull-heading">New results from Grad Café</h2>
+        <p>
+          Pull Data checks Grad Café for results posted since the newest entry in the
+          database and adds them. Entries already in the database are never changed.
+          A Chrome window opens while it runs; if Grad Café shows a verification check,
+          complete it in that window. Depending on how much new data there is, this can
+          take several minutes.
+        </p>
+        {% if pull_status %}
+        <p class="pull-status is-{{ pull_status.state }}" role="status">{{ pull_status.text }}</p>
+        {% endif %}
+      </div>
+      <form method="post" action="{{ url_for('pull') }}">
+        <button type="submit" class="button"{% if pull_running %} disabled{% endif %}>Pull Data</button>
+      </form>
+    </section>
+
     {% if error %}
     <section class="notice notice-error" role="alert">
       <p>{{ error }}</p>

@@ -202,6 +202,67 @@ h3 {
 
 .is-thin .basis-text { color: #8a6114; }
 
+/* Pull Data panel */
+
+.pull {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 2rem;
+  margin: 0 0 2.5rem;
+  padding: 1.5rem 1.75rem;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+}
+
+.pull h2 { font-size: 1.1875rem; margin: 0 0 0.5rem; }
+
+.pull-text { max-width: var(--measure); }
+
+.pull-text p { margin: 0; font-size: 0.9375rem; color: var(--muted); }
+
+.pull-text .pull-status {
+  margin-top: 0.9rem;
+  padding-left: 0.75rem;
+  border-left: 3px solid var(--bar);
+  color: var(--ink);
+}
+
+.pull-status.is-running { border-left-color: var(--thin); }
+.pull-status.is-failed { border-left-color: var(--error); }
+
+.button {
+  font: 600 0.9375rem/1 var(--sans);
+  color: #ffffff;
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  border-radius: 3px;
+  padding: 0.7rem 1.1rem;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.button:hover { background: #2c4056; }
+
+.button:disabled {
+  background: var(--track);
+  border-color: var(--rule);
+  color: var(--muted);
+  cursor: not-allowed;
+}
+
+.flash {
+  max-width: var(--measure);
+  margin: 0 0 1.25rem;
+  padding: 0.75rem 1rem;
+  font-size: 0.9375rem;
+  background: var(--sheet);
+  border: 1px solid var(--rule);
+  border-left: 4px solid var(--bar);
+}
+
+.flash-warning { border-left-color: var(--thin); }
+
 /* Notices */
 
 .notice {
@@ -241,7 +302,7 @@ a:focus-visible, button:focus-visible {
 
 @media (max-width: 40rem) {
   .page { padding: 2rem 1rem 3rem; }
-  .masthead { flex-direction: column; gap: 1.25rem; }
+  .masthead, .pull { flex-direction: column; gap: 1.25rem; }
   .question { grid-template-columns: 1fr; padding: 1.25rem; }
   .number { text-align: left; padding: 0 0 0.25rem; }
   .value { font-size: 1.375rem; }

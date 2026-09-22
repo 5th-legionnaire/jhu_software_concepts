@@ -8,19 +8,26 @@ Contains:
     create_app():      application factory
     build_sections():  turns ORM results into display-ready sections
     index():           the analysis page (route "/")
+    pull():            Pull Data (route "/pull-data", POST), which starts pull_data.py
 
 Every database read goes through the SQLAlchemy Applicant model, via the
 functions in orm_queries.py; no query logic is duplicated in the routes.
 Results are read on every request, so the page always reflects the current
 contents of PostgreSQL.
 
+Pull Data runs pull_data.py as a subprocess, so a pull that takes minutes
+never blocks the page. The app keeps the subprocess handle and will not start
+another pull while that one is still running.
+
 Usage:
     python3 app.py      # then open http://127.0.0.1:8080
 """
 
 import os
+import subprocess
+import sys
 
-from flask import Flask, render_template
+from flask import Flask, flash, redirect, render_template, url_for
 from sqlalchemy.exc import SQLAlchemyError
 
 from models import get_session
@@ -29,6 +36,10 @@ from query_data import fmt_avg, fmt_count, fmt_diff, fmt_pct
 
 # Answers resting on less than this share of the dataset are flagged as thin.
 THIN_SHARE = 0.05
+
+MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
+PULL_SCRIPT = os.path.join(MODULE_DIR, "pull_data.py")
+PULL_LOG = os.path.join(MODULE_DIR, "pull_work", "pull_data.log")
 
 
 def _row(label, value, n=None, detail=None):
@@ -131,12 +142,58 @@ def build_sections(r, total):
     ], total)
 
 
+def _last_line(path):
+    """The last non-blank line of a file: pull_data.py's latest progress or result."""
+    try:
+        with open(path, encoding="utf-8") as handle:
+            lines = [line.strip() for line in handle if line.strip()]
+    except OSError:
+        return ""
+    return lines[-1] if lines else ""
+
+
 def create_app():
     """Build and configure the Flask application."""
     app = Flask(__name__)
+    # Signs the one-time notices shown after a button press.
+    app.secret_key = os.environ.get("FLASK_SECRET_KEY") or os.urandom(24)
+    app.config["PULL_PROCESS"] = None
+
+    def pull_running():
+        """True while the Pull Data subprocess this app started is still running."""
+        process = app.config["PULL_PROCESS"]
+        return process is not None and process.poll() is None
+
+    def pull_status():
+        """What to show about the latest pull, or None if none has run since the app started."""
+        process = app.config["PULL_PROCESS"]
+        if process is None:
+            return None
+        line = _last_line(PULL_LOG) or "Starting."
+        if process.poll() is None:
+            return {"state": "running", "text": f"New data is being retrieved. {line}"}
+        if process.returncode == 0:
+            return {"state": "succeeded", "text": f"Last pull finished. {line}"}
+        return {"state": "failed", "text": line}
+
+    @app.post("/pull-data")
+    def pull():
+        if pull_running():
+            flash("Pull Data is already running, so it was not started again. The status "
+                  "below shows its progress.", "warning")
+            return redirect(url_for("index"))
+        os.makedirs(os.path.dirname(PULL_LOG), exist_ok=True)
+        with open(PULL_LOG, "w", encoding="utf-8") as log:
+            app.config["PULL_PROCESS"] = subprocess.Popen(
+                [sys.executable, "-u", PULL_SCRIPT], cwd=MODULE_DIR,
+                stdout=log, stderr=subprocess.STDOUT)
+        flash("Pull Data started. A Chrome window will open while it checks Grad Café. "
+              "The results below still show the data from before this pull.", "info")
+        return redirect(url_for("index"))
 
     @app.route("/")
     def index():
+        running, status = pull_running(), pull_status()
         try:
             with get_session() as session:
                 summary = dataset_summary(session)
@@ -148,6 +205,7 @@ def create_app():
                 error="The database could not be reached. Check that PostgreSQL is running "
                       "and that the connection settings in .env are correct, then reload "
                       "this page.",
+                pull_running=running, pull_status=status,
             ), 503
         return render_template(
             "index.html",
@@ -155,6 +213,8 @@ def create_app():
             total_text=fmt_count(summary["total"]),
             thin_pct=int(THIN_SHARE * 100),
             sections=build_sections(results, summary["total"]),
+            pull_running=running,
+            pull_status=status,
         )
 
     return app
