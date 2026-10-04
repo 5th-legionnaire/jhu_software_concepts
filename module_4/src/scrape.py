@@ -1,8 +1,9 @@
 """
 scrape.py — GradCafe admissions results scraper.
 
-EN 605.256 Modern Software Concepts in Python, Module 2.
+EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
+Written for Module 2 and carried over unchanged.
 
 Contains:
     scrape_data() — pull raw result pages from GradCafe and save them

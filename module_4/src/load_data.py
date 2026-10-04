@@ -3,8 +3,9 @@ load_data.py: This program takes the cleaned applicant data
 produced in Module 2 and loads it into a PostgreSQL database
 (it may reuse existing functionality / move around content from clean.py and scrape.py).
 
-EN 605.256 Modern Software Concepts in Python, Module 3.
+EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
+Written for Module 3; see the README for what Module 4 changed.
 
 Contains:
     get_db_config():     connection settings from DATABASE_URL, or the PG* fallbacks
@@ -14,8 +15,8 @@ Contains:
     insert_records():    load records already in memory, in one transaction
     load_data():         read records back from a JSON file and load them into a PostgreSQL database
 
-Usage:
-    python3 load_data.py [path/to/llm_extend_applicant_data.json]
+Usage (from module_4/):
+    python3 src/load_data.py [path/to/llm_extend_applicant_data.json]
 """
 
 import json

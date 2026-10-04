@@ -176,6 +176,22 @@ Fill overview, architecture, testing, and operations. `api.rst` already
 autodocs all eight modules. Build locally, then make the repo public and
 connect Read the Docs. Link the published URL from `module_4/README.md`.
 
+Two things to handle while there:
+
+- `orm_queries.py`'s twelve runner functions (`q1` through `uq2`,
+  `dataset_summary`, `all_results`) have no docstrings, and `conf.py` sets
+  `undoc-members: True`, so autodoc will render them as bare signatures. One
+  rubric point is for documentation being "clear, organized, and
+  professional". Give each a one-line docstring.
+- `architecture.rst` must carry the JSON-versus-redirect decision and
+  `operations.rst` the busy-state and uniqueness policy, including why Update
+  Analysis is now gated when Module 3 deliberately allowed it. The README
+  needs the same explanation in its carried-over-changes section.
+
+Section titles the source now references by name, which the README must
+therefore actually use: **Additional columns** (`models.py`), **LLM
+standardizer setup** (`pull_data.py`), **Validity ranges** (`query_data.py`).
+
 ## Rubric traceability
 
 | Pts | Category | Where it is earned |

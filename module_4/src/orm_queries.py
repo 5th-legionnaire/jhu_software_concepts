@@ -2,8 +2,9 @@
 orm_queries.py: This program repeats selected Module 3 analyses using the
 SQLAlchemy ORM instead of handwritten SQL.
 
-EN 605.256 Modern Software Concepts in Python, Module 3.
+EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
+Written for Module 3 and carried over unchanged.
 
 Part 6 questions, printed by main():
     Question 1, Question 4, Question 5, Question 8, Question 9, and
@@ -21,9 +22,9 @@ Validity ranges, matching patterns, and output formatters are imported from
 query_data.py (constants and functions only; none of its SQL), so the raw SQL
 and ORM answers apply identical filters and identical formatting.
 
-Usage:
-    python3 orm_queries.py          # Part 6 results
-    python3 orm_queries.py --sql    # also print the SQL SQLAlchemy generates
+Usage (from module_4/):
+    python3 src/orm_queries.py          # Part 6 results
+    python3 src/orm_queries.py --sql    # also print the SQL SQLAlchemy generates
 """
 
 import sys

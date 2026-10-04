@@ -2,8 +2,9 @@
 query_data.py: This program answers the Module 3 analysis questions about
 Grad Cafe submissions using SQL queries executed through psycopg.
 
-EN 605.256 Modern Software Concepts in Python, Module 3.
+EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
+Written for Module 3 and carried over unchanged.
 
 Contains:
     Validity ranges:  GPA_RANGE, GRE_Q_RANGE, GRE_V_RANGE, GRE_AW_RANGE
@@ -15,13 +16,13 @@ Every analysis is expressed in SQL. Python only executes the queries and
 formats the results. The SQL strings are module-level constants so the exact
 text that runs is the text quoted in query_results.pdf.
 
-Usage:
-    python3 query_data.py
+Usage (from module_4/):
+    python3 src/query_data.py
 """
 
 from load_data import create_connection, get_db_config
 
-# Validity ranges (README section 7.2)
+# Validity ranges (see "Validity ranges" in the README)
 #
 # Applied inside the averaging queries only; the table holds every value as
 # reported. A value outside its metric's scale does not "provide" that metric,

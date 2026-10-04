@@ -1,8 +1,9 @@
 """
 app.py: Flask application that displays the Grad Cafe analysis.
 
-EN 605.256 Modern Software Concepts in Python, Modules 3 and 4.
+EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
+Written for Module 3; see the README for what Module 4 changed.
 
 Contains:
     PullState:            whether a pull is running, and how the last one ended
@@ -19,7 +20,7 @@ Contains:
 
 Every outward dependency reaches the application as an argument to
 create_app(), and every default is the real implementation, so running
-`python3 app.py` behaves as it did in Module 3. A test passes a fake scraper,
+`python3 src/app.py` behaves as it did in Module 3. A test passes a fake scraper,
 loader, or query instead, and reaches no network and no database.
 
 The two buttons answer JSON rather than redirecting, which is what lets a
@@ -42,8 +43,8 @@ the loader's single transaction makes a concurrent read safe. That is still
 true, but a refresh taken mid-pull reports a total that is about to change, so
 the pull now has the page to itself and the answer is never half-stale.
 
-Usage:
-    python3 app.py      # then open http://127.0.0.1:8080/analysis
+Usage (from module_4/):
+    python3 src/app.py      # then open http://127.0.0.1:8080/analysis
 """
 
 import os
@@ -279,7 +280,7 @@ def create_app(scraper=None, loader=None, query=None, runner=None,
     """Build and configure the Flask application.
 
     Every argument defaults to the real implementation, so running
-    `python3 app.py` is unchanged from Module 3. Tests pass fakes instead;
+    `python3 src/app.py` is unchanged from Module 3. Tests pass fakes instead;
     this factory is the seam the whole Module 4 suite hangs on.
 
     Args:

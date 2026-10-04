@@ -1,8 +1,9 @@
 """
 models.py: SQLAlchemy ORM representation of the applicants table.
 
-EN 605.256 Modern Software Concepts in Python, Module 3.
+EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
+Written for Module 3; see the README for what Module 4 changed.
 
 Contains:
     Base:                   declarative base for the ORM models
@@ -17,8 +18,8 @@ The table is created and loaded by load_data.py. This module maps it and does
 not create, alter, or copy it: there is one applicants table, read by both the
 raw SQL and ORM code.
 
-Usage:
-    python3 models.py    # verify the model against the live table
+Usage (from module_4/):
+    python3 src/models.py    # verify the model against the live table
 """
 
 import os
@@ -37,7 +38,7 @@ DRIVER = "postgresql+psycopg"
 
 
 class Base(DeclarativeBase):
-    """Declarative base for the Module 3 ORM models."""
+    """Declarative base for the Grad Cafe ORM models."""
 
 
 class Applicant(Base):
@@ -64,7 +65,8 @@ class Applicant(Base):
     llm_generated_program: Mapped[str | None] = mapped_column(Text)
     llm_generated_university: Mapped[str | None] = mapped_column(Text)
 
-    # Additional columns carried over from Module 2 (README section 5.2).
+    # Additional columns carried over from Module 2; see "Additional columns"
+    # in the README for why no parsed field is dropped.
     program_name: Mapped[str | None] = mapped_column(Text)
     university: Mapped[str | None] = mapped_column(Text)
     decision_date: Mapped[str | None] = mapped_column(Text)

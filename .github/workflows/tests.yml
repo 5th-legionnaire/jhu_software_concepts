@@ -42,7 +42,9 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.13"
+          # Pinned to the exact version the suite is developed against, so a
+          # CI failure is never a Python version difference.
+          python-version: "3.14.6"
           cache: pip
 
       - name: Install dependencies

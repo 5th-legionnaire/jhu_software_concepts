@@ -1,8 +1,9 @@
 """
 clean.py — turn saved GradCafe pages into structured applicant records.
 
-EN 605.256 Modern Software Concepts in Python, Module 2.
+EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
+Written for Module 2 and carried over unchanged.
 
 Contains:
     clean_data() — parse saved HTML pages into a list of applicant records

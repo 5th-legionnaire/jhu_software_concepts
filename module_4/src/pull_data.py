@@ -1,8 +1,9 @@
 """
 pull_data.py: Pull newly posted Grad Cafe entries into PostgreSQL (Part 9).
 
-EN 605.256 Modern Software Concepts in Python, Modules 3 and 4.
+EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
+Written for Module 3; see the README for what Module 4 changed.
 
 Reuses the Module 2 code rather than reimplementing it:
     1. scrape.py     fetch result pages newer than the newest entry in the database
@@ -25,8 +26,8 @@ with a plain callable. Every outward dependency reaches this module as an
 argument: the browser, the LLM standardizer, the database connection, and even
 the politeness delay between page requests.
 
-Usage:
-    python3 pull_data.py
+Usage (from module_4/):
+    python3 src/pull_data.py
 """
 
 import json
@@ -235,7 +236,8 @@ def scrape_new_records(session_factory=None, browser_factory=None, standardize=N
     if not os.path.exists(LLM_PYTHON):
         raise PullError(
             "The LLM standardizer's environment was not found at llm_hosting/.venv. Set it "
-            "up as described in the README (section 3.4). No entries were added.")
+            "up as described under \"LLM standardizer setup\" in the README. No entries "
+            "were added.")
 
     print(f"Standardizing {len(records):,} new entries with the LLM.")
     standardized = standardize(records)
