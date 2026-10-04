@@ -115,7 +115,8 @@ def _start_browser():
     return scrape._start_browser(headless=False)
 
 
-def _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=time.sleep):
+def _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=time.sleep,
+                      fetch_html=None):
     """Save result pages, newest first, until reaching an entry already in the database.
 
     Grad Cafe lists entries newest first and result ids increase over time, so
@@ -128,10 +129,18 @@ def _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=time.sleep)
         browser_factory: callable returning a Selenium driver.
         sleep: the delay between page requests. Injected so a test passes a
             no-op rather than waiting, which is why this suite needs no sleep().
+        fetch_html: callable(driver, url) returning a page's HTML or None.
+            Defaults to scrape._fetch_html, which drives a real Selenium
+            WebDriverWait. Injected separately from browser_factory because
+            WebDriverWait polls on a real clock: a test exercising the
+            "page never arrived" branch through the real function would
+            block for its full timeout. A fake here keeps that branch fast
+            without touching browser_factory's contract at all.
 
     Returns:
         bool: False if a page could not be fetched, True otherwise.
     """
+    fetch_html = fetch_html or scrape._fetch_html
     shutil.rmtree(PAGES_DIR, ignore_errors=True)
     os.makedirs(PAGES_DIR)
     added_start = (newest_date - timedelta(days=1)).isoformat()
@@ -142,7 +151,7 @@ def _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=time.sleep)
     try:
         while True:
             print(f"Checking Grad Café for new entries (page {page + 1}).")
-            html = scrape._fetch_html(driver, scrape._build_url(added_start, added_end, cursor))
+            html = fetch_html(driver, scrape._build_url(added_start, added_end, cursor))
             if html is None:
                 return False
             ids = [int(i) for i in RESULT_ID.findall(html)]
@@ -195,7 +204,8 @@ def _standardize(records, run=subprocess.run):
     return standardized if len(standardized) == len(records) else None
 
 
-def scrape_new_records(session_factory=None, browser_factory=None, standardize=None):
+def scrape_new_records(session_factory=None, browser_factory=None, standardize=None,
+                       fetch_html=None, sleep=time.sleep):
     """Fetch, parse, and standardize every Grad Cafe entry newer than the database's newest.
 
     This is the default scraper create_app() injects. Each dependency is an
@@ -206,6 +216,11 @@ def scrape_new_records(session_factory=None, browser_factory=None, standardize=N
         session_factory: returns a Session, for reading the newest loaded entry.
         browser_factory: returns a Selenium driver.
         standardize: takes records and returns standardized records, or None.
+        fetch_html: callable(driver, url) returning a page's HTML or None.
+            See _scrape_new_pages for why this is separate from browser_factory.
+        sleep: the delay between page requests, passed through to
+            _scrape_new_pages. A test covering more than one page overrides
+            this, or it would wait out a real PAGE_DELAY between pages.
 
     Returns:
         list[dict]: standardized records, empty when Grad Cafe has nothing new.
@@ -222,7 +237,8 @@ def scrape_new_records(session_factory=None, browser_factory=None, standardize=N
     if newest_id is None:
         raise PullError("The database is empty. Run load_data.py before pulling new entries.")
 
-    if not _scrape_new_pages(newest_id, newest_date, browser_factory):
+    if not _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=sleep,
+                             fetch_html=fetch_html):
         raise PullError(
             "Grad Café did not return results. If a verification check appeared, complete "
             "it in the Chrome window, then click Pull Data again. No entries were added.")

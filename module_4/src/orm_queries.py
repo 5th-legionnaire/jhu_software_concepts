@@ -4,7 +4,9 @@ SQLAlchemy ORM instead of handwritten SQL.
 
 EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
-Written for Module 3 and carried over unchanged.
+Written for Module 3. Module 4 adds REQUIRED_FIELDS and fetch_one(), the
+simple query function the testing assignment asks for; the Module 3 analyses
+below are otherwise unchanged.
 
 Part 6 questions, printed by main():
     Question 1, Question 4, Question 5, Question 8, Question 9, and
@@ -68,6 +70,15 @@ def _matches_any(column, pattern):
     """
     return or_(*(_matches(column, alternative) for alternative in pattern.split("|")))
 
+
+# The Module 3 required schema fields, in schema order. Excludes
+# program_name, university, and decision_date: those are additional columns
+# outside the assignment schema (see "Additional columns" in the README).
+REQUIRED_FIELDS = (
+    "p_id", "program", "comments", "date_added", "url", "status", "term",
+    "us_or_international", "gpa", "gre", "gre_v", "gre_aw", "degree",
+    "llm_generated_program", "llm_generated_university",
+)
 
 FALL_2026 = _ci_eq(Applicant.term, "fall 2026")
 FALL_2025 = _ci_eq(Applicant.term, "fall 2025")
@@ -245,6 +256,22 @@ def uq1(session):
 def uq2(session):
     return [{"degree": d, "nationality": nat, "entries": n, "accepted": a, "pct": p}
             for d, nat, n, a, p in session.execute(uq2_stmt())]
+
+
+def applicant_dict(applicant):
+    """One Applicant row as a dict of the Module 3 required schema fields."""
+    return {field: getattr(applicant, field) for field in REQUIRED_FIELDS}
+
+
+def fetch_one(session):
+    """Return one applicant row as a dict with the Module 3 required schema keys.
+
+    This is the simple query function the assignment's database-writes
+    section asks for: proof that a row can be read back with the right
+    shape, independent of any analysis. Returns None if the table is empty.
+    """
+    applicant = session.scalars(select(Applicant).order_by(Applicant.p_id).limit(1)).first()
+    return applicant_dict(applicant) if applicant else None
 
 
 def dataset_summary(session):

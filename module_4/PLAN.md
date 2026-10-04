@@ -126,27 +126,75 @@ scripts, preserving Module 3 behavior.
 - `PullError` carries the "stopped, nothing written" messages that Module 3
   returned as exit codes, so the route can put the reason in its 500 body.
 
-## Phase 1: tests
+## Phase 1: tests (COMPLETE)
 
-`tests/` already holds the five required files with every rubric line stubbed
-as a skipped test. Work the skips off one at a time, running the suite after
-each. Fill `conftest.py` fixtures first; three of them currently raise
-`NotImplementedError` by design (`fake_rows`, `clean_db`, `app`).
+All 20 tests across the five required files pass:
+`pytest -m "web or buttons or analysis or db or integration"` → `20 passed`.
 
-Two fixtures need rewriting against the phase 0 contract rather than filling
-in as stubbed:
+### Two application fixtures, not one
 
-- `app` must pass `testing=True`, which is what selects `run_inline`. Without
-  it the default runner is a background thread and the suite goes
-  nondeterministic.
-- The `web` and `analysis` tests take a `query` fake and no `clean_db`, so
-  they need no database. Only `db` and `integration` tests take `clean_db`.
+The stubbed `conftest.py` had a single `app` fixture, built from
+`fake_scraper` and `fake_loader`. That cannot serve both halves of the suite:
+web, buttons, and analysis tests need zero PostgreSQL, but db and
+integration tests need rows to actually land and actually be queryable.
+Faking the loader rules out the first; using the real loader rules out the
+second, for the *same* fixture.
 
-`clean_db` should build the table with `load_data.create_table` rather than
-`Base.metadata.create_all`, so the schema under test is the production one,
-column comments and `ON CONFLICT` target included.
+Resolved with two fixtures:
 
-## Phase 2: coverage to 100
+| Fixture | scraper | loader | query | Used by |
+|---|---|---|---|---|
+| `app` / `client` | `fake_scraper` | `fake_loader` (records calls, writes nothing) | `fake_query` (new) | `web`, `buttons`, `analysis` |
+| `db_client` | `fake_scraper` | real, against `clean_db` | real, against `clean_db` | `db`, `integration` |
+
+Adding `fake_query` is what makes `buttons` tests database-free too, not
+only `web` and `analysis` as originally scoped: `POST /update-analysis` calls
+`query()` even when not busy, so without a fake it would reach PostgreSQL.
+Measured: the 13 `web`/`buttons`/`analysis` tests run in 0.04s with no
+`DATABASE_URL` set at all, confirming they touch no database.
+
+`app` still passes `testing=True`, selecting the inline pull runner so a
+`POST /pull-data` has finished by the time the request returns.
+
+`clean_db` builds the schema with `load_data.create_table` (not
+`Base.metadata.create_all`), so column comments and the `ON CONFLICT (p_id)`
+target are the production ones. If PostgreSQL is unreachable, it calls
+`pytest.fail()` with a message naming what to do, rather than skipping: a
+silent skip would quietly reduce coverage while looking like a neutral
+result.
+
+### A query function the suite needed and the app did not have
+
+The assignment's database-writes section asks for "a simple query function"
+returning "a dict with our expected keys (the required data fields within
+M3)" — distinct from `orm_queries.all_results()`, which returns the nested
+per-question shape the analysis page consumes. No such function existed.
+Added to `orm_queries.py`:
+
+- `REQUIRED_FIELDS`: the 15 Module 3 schema columns, in schema order.
+  Excludes `program_name`, `university`, `decision_date` (the
+  README's "Additional columns").
+- `applicant_dict(applicant)`: one `Applicant` row as a dict of those fields.
+- `fetch_one(session)`: the newest-by-`p_id` row, same shape, or `None`.
+
+### Test data
+
+`fake_rows` (two records, Module 2 JSON key format) is deliberately the
+shape the real scraper returns after standardization, so the same fixture
+exercises `create_app()`'s default loader path end to end in `db_client`
+tests, not just the fake path.
+
+### A bug this phase's smoke-testing surfaced, not fixed here
+
+Constructing a `DATABASE_URL` by hand with an unescaped `@` in the password
+fails to connect (psycopg reads past the `@` as the host separator). This is
+expected `urllib.parse` behavior, not a code defect: `models.build_url()`
+already percent-decodes a URL that was percent-*encoded* going in. Noted
+here because it cost real debugging time once; a password containing `@`,
+`/`, or `:` must be percent-encoded by whoever writes the `.env` or exports
+`DATABASE_URL`.
+
+## Phase 2: coverage to 100 (IN PROGRESS: 58% -> 73.47%)
 
 Run `pytest` and work `term-missing` top down. Expected trouble spots:
 
@@ -162,6 +210,47 @@ Run `pytest` and work `term-missing` top down. Expected trouble spots:
   debug helper that only the CLI reaches. Cover them with a session double
   rather than pragma: they are pure result formatting.
 - Commit the terminal summary to `module_4/coverage_summary.txt`.
+
+### Closed: the scraper orchestration had zero coverage
+
+Caught during Phase 1 review, not planned up front: `test_buttons.py` fakes
+the whole `scraper` callable at the `create_app()` boundary, exactly as the
+assignment asks ("should be faked / mocked"). That is correct for testing the
+route's contract, but it meant `pull_data.scrape_new_records()`,
+`_scrape_new_pages()`, `_standardize()`, and every function in `clean.py` ran
+under zero tests: not a style gap, a behavioral one. Nothing proved the real
+stop-at-the-database's-newest-id logic, the record filtering, or the LLM
+subprocess output handling actually worked.
+
+Closed with a new file, `tests/test_pull_pipeline.py`, marked `buttons`
+(the marker's canonical text, from the assignment's own required
+`pytest.ini` block, is `"Pull Data" and "Update Analysis" behavior`, not
+"button endpoints" - testing what Pull Data's pipeline actually does fits
+that text, even invoked one level below the Flask route). It calls
+`scrape_new_records()` for real, with a fake browser and a fake LLM process,
+proving the real orchestration logic. Required two more injection seams,
+added following the exact pattern already in place:
+
+- `_scrape_new_pages()` / `scrape_new_records()` gained `fetch_html`.
+  `scrape._fetch_html()` drives a real Selenium `WebDriverWait`; a test
+  exercising the "page never arrived" branch through it would block for the
+  real 30-second timeout. `fetch_html` is injected separately from
+  `browser_factory` so a fake can answer instantly while the driver
+  argument's contract stays untouched.
+- `scrape_new_records()` now threads its `sleep` argument through to
+  `_scrape_new_pages()`, which it previously dropped silently. A genuine
+  two-page pagination test (following a "Next" link) would otherwise hit a
+  real `PAGE_DELAY` (2 seconds) between pages - caught only because the test
+  that needed two pages ran slow until this was fixed.
+
+Measured result: `pull_data.py` 37% -> 87%, `scrape.py` 27% -> 39%,
+`clean.py` 23% -> 83%. All 11 new tests run in 0.02s with no database.
+`scrape.py`'s remaining gap is almost entirely `scrape_data()`, `_resume()`,
+and `save_data()`: the Module 2 one-time historical-pull functions, which the
+Module 3/4 Pull Data button never calls (it uses `_start_browser`,
+`_build_url`, `_next_cursor`, and `_page_path` directly). These still count
+toward `--cov=src`'s 100% and are not yet covered or pragma'd; next to
+address.
 
 ## Phase 3: CI
 

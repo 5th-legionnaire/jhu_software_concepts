@@ -515,8 +515,8 @@ below 5.00% of the dataset so thin evidence reads as thin.
 
 ## Testing
 
-_This section is completed as the suite lands. See `PLAN.md` for the current
-phase._
+_Coverage is not yet at the required 100%; see `PLAN.md` for the current
+phase. The figures and test counts below are measured, not projected._
 
 The full suite runs from `module_4/`, because `pytest.ini` scopes coverage to
 `src/` relative to itself:
@@ -527,22 +527,74 @@ pytest -m "web or buttons or analysis or db or integration"
 ```
 
 Every test carries at least one marker; unmarked tests are not permitted.
+`pytest.ini`'s marker text is the assignment's own required wording, quoted
+exactly:
 
-| Marker | Covers |
+| Marker | `pytest.ini` text |
 | --- | --- |
-| `web` | Flask route and page-structure tests |
-| `buttons` | Pull Data and Update Analysis endpoints, and busy-state gating |
-| `analysis` | Label and percentage formatting |
-| `db` | Schema, inserts, selects, uniqueness |
-| `integration` | End-to-end pull → update → render |
+| `web` | Flask route/page tests |
+| `buttons` | "Pull Data" and "Update Analysis" behavior |
+| `analysis` | formatting/rounding of analysis output |
+| `db` | database schema/inserts/selects |
+| `integration` | end-to-end flows |
 
-Tests reach the application only through `create_app()`. No test touches the
-live internet, launches a browser, runs a real scrape, or calls `sleep()`. The
-`web` and `analysis` tests inject a fake `query` and need no database at all;
-only the `db` and `integration` markers require PostgreSQL.
+### Two application fixtures
 
-_Pending: the fixture and test-double reference, the coverage figure, and the
-contents of `coverage_summary.txt`._
+Tests reach the application only through `create_app()`, via two fixtures in
+`conftest.py` that fake different amounts of it:
+
+| Fixture | scraper | loader | query | Needs PostgreSQL |
+| --- | --- | --- | --- | --- |
+| `app` / `client` | fake | fake (records calls, writes nothing) | fake | No |
+| `db_client` | fake | real, against a truncated test database | real, same database | Yes |
+
+`app`/`client` serves `web`, `buttons`, and `analysis` tests. Faking `query`
+as well as the scraper and loader is what keeps `POST /update-analysis` from
+reaching PostgreSQL even when a pull is not in progress: without it, only
+`web` and `analysis` would be database-free, since `buttons` tests call that
+route too. Measured: all 24 `web`/`buttons`/`analysis` tests run in 0.05s with
+no `DATABASE_URL` set at all. `db_client` serves `db` and `integration`
+tests, against a disposable database `clean_db` truncates before and after
+each test; its scraper is still faked, so even these tests never reach Grad
+Café, but its loader and queries are real, which is what lets a test assert
+on actual rows.
+
+### Why the scraper is faked at two different depths
+
+`test_buttons.py` fakes the whole `scraper` callable at the `create_app()`
+boundary, which is what the assignment itself asks for ("Triggers the loader
+with the rows from the scraper (should be faked / mocked)"). That tests the
+route's contract: status codes, the JSON shape, busy gating. It does not
+exercise what Pull Data's scraper actually does when it runs, because the
+real `pull_data.scrape_new_records()` is never called.
+
+`test_pull_pipeline.py` closes that gap, also marked `buttons` per the table
+above (its definition is "Pull Data" behavior, not "button endpoint"
+behavior, so testing the pipeline one level below the route fits it). It
+calls the real `scrape_new_records()`, with a fake Selenium driver and a fake
+LLM subprocess standing in for the two outward dependencies, and proves the
+real logic: stopping at the database's newest entry across multiple pages of
+results, filtering out entries already present, and each of Pull Data's error
+paths (empty database, Grad Café unreachable, no new entries, the
+standardizer's environment missing). `clean.py`'s HTML parsing is exercised
+directly against small crafted pages, no fakes needed at all, since it is
+pure parsing with no outward dependency to replace.
+
+Writing these tests needed two more injection seams in `pull_data.py`, added
+to dependencies that were already there rather than new ones:
+
+- `fetch_html`, because `scrape._fetch_html()` drives a real Selenium
+  `WebDriverWait`. A test for "the page never arrived" routed through the
+  real function would block for its full 30-second timeout; `fetch_html` can
+  answer instantly instead, without touching what `browser_factory` means.
+- `scrape_new_records()`'s `sleep` argument, which it previously dropped
+  rather than passing to `_scrape_new_pages()`. A genuine two-page pagination
+  test needs two pages, which otherwise means one real `PAGE_DELAY` (2
+  seconds) in the middle of a test suite that is supposed to run in seconds,
+  not minutes.
+
+_Pending: the final coverage figure and the contents of
+`coverage_summary.txt`, committed once Phase 2 reaches 100%._
 
 ## Documentation
 
