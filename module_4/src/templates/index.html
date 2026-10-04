@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Grad Café admissions analysis</title>
+  <title>Analysis | Grad Café admissions</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet"
@@ -14,7 +14,7 @@
   <main class="page">
     <header class="masthead">
       <div class="masthead-text">
-        <h1>Grad Café admissions, as posted</h1>
+        <h1>Grad Café Admissions Analysis</h1>
         {% if summary and summary.total %}
         <p class="dek">
           Analysis of {{ total_text }} self-reported results added to Grad Café between
@@ -24,20 +24,16 @@
         {% endif %}
       </div>
       <div class="actions">
-        <form method="post" action="{{ url_for('update') }}">
-          <button type="submit" class="button button-quiet">Update Analysis</button>
-        </form>
+        <button type="button" class="button button-quiet"
+                data-testid="update-analysis-btn"
+                data-action="{{ url_for('update') }}">Update Analysis</button>
         {% if queried_text %}
         <p class="as-of">Results as of {{ queried_text }}</p>
         {% endif %}
       </div>
     </header>
 
-    {% with notices = get_flashed_messages(with_categories=true) %}
-    {% for category, text in notices %}
-    <p class="flash flash-{{ category }}" role="status">{{ text }}</p>
-    {% endfor %}
-    {% endwith %}
+    <p class="flash" id="action-notice" role="status" hidden></p>
 
     <section class="pull" aria-labelledby="pull-heading">
       <div class="pull-text">
@@ -53,9 +49,10 @@
         <p class="pull-status is-{{ pull_status.state }}" role="status">{{ pull_status.text }}</p>
         {% endif %}
       </div>
-      <form method="post" action="{{ url_for('pull') }}">
-        <button type="submit" class="button"{% if pull_running %} disabled{% endif %}>Pull Data</button>
-      </form>
+      <button type="button" class="button"
+              data-testid="pull-data-btn"
+              data-action="{{ url_for('pull') }}"
+              {% if pull_running %}disabled{% endif %}>Pull Data</button>
     </section>
 
     {% if error %}
@@ -73,7 +70,7 @@
       <span class="legend-bar" aria-hidden="true"><span style="width: 62%"></span></span>
       <p>
         Each bar shows how many of the {{ total_text }} entries an answer rests on.
-        Amber marks answers resting on less than {{ thin_pct }}% of the data, where a
+        Amber marks answers resting on less than {{ thin_pct_text }} of the data, where a
         handful of posts can move the result.
       </p>
     </aside>
@@ -91,11 +88,11 @@
               {% for row in item.rows %}
               <div class="answer{% if row.thin %} is-thin{% endif %}">
                 <dt>{{ row.label }}</dt>
-                <dd class="value">{{ row.value }}</dd>
+                <dd class="value"><span class="answer-label">Answer:</span> {{ row.value }}</dd>
                 {% if row.n is not none %}
                 <dd class="basis">
                   <span class="bar" role="img"
-                        aria-label="{{ row.n_text }}, {{ row.share_pct }}% of the dataset">
+                        aria-label="{{ row.n_text }}, {{ row.share_text }} of the dataset">
                     <span style="width: {{ [row.share_pct, 0.6] | max }}%"></span>
                   </span>
                   <span class="basis-text">{{ row.basis }}</span>
@@ -115,10 +112,64 @@
     {% endif %}
 
     <footer class="colophon">
-      <p>EN 605.256 Modern Software Concepts in Python, Module 3. Joshua Latz (jlatz1).
+      <p>EN 605.256 Modern Software Concepts in Python, Module 4. Joshua Latz (jlatz1).
          Averages include only values on each metric's own scale; see the README for the
          validity ranges and how they were chosen.</p>
     </footer>
   </main>
+
+  <script>
+    // The two buttons post to the JSON routes rather than submitting a form, so
+    // a caller sees {"ok": true} or {"busy": true} instead of a 302. On success
+    // the page is reloaded, which re-runs every query server side; that reload
+    // is what makes the refreshed figures and the server-rendered pull status
+    // appear. Nothing here is required for the routes themselves to work, so
+    // the test suite drives them with Flask's test client and no browser.
+    (function () {
+      var notice = document.getElementById("action-notice");
+      var buttons = document.querySelectorAll("[data-action]");
+
+      function show(text, kind) {
+        notice.textContent = text;
+        notice.className = "flash flash-" + kind;
+        notice.hidden = false;
+      }
+
+      function enable(enabled) {
+        buttons.forEach(function (button) { button.disabled = !enabled; });
+      }
+
+      function post(button) {
+        enable(false);
+        show("Working...", "info");
+
+        fetch(button.dataset.action, {
+          method: "POST",
+          headers: { "Accept": "application/json" }
+        }).then(function (response) {
+          return response.json().then(function (body) {
+            if (response.status === 409) {
+              show("A pull is already running, so nothing was started. Try again once "
+                   + "it has finished.", "warning");
+            } else if (!body.ok) {
+              show(body.error || "The request did not succeed.", "warning");
+            } else {
+              window.location.reload();
+              return;
+            }
+            enable(true);
+          });
+        }).catch(function () {
+          show("The request could not be sent. Check that the server is still running.",
+               "warning");
+          enable(true);
+        });
+      }
+
+      buttons.forEach(function (button) {
+        button.addEventListener("click", function () { post(button); });
+      });
+    })();
+  </script>
 </body>
 </html>

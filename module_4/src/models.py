@@ -5,10 +5,13 @@ EN 605.256 Modern Software Concepts in Python, Module 3.
 Joshua Latz (jlatz1)
 
 Contains:
-    Base:            declarative base for the ORM models
-    Applicant:       model mapped to the existing applicants table
-    get_engine():    the SQLAlchemy Engine, built from the same PG* settings as load_data.py
-    get_session():   a new Session bound to that Engine
+    Base:                   declarative base for the ORM models
+    Applicant:              model mapped to the existing applicants table
+    build_url():            the SQLAlchemy URL, from DATABASE_URL or the PG* fallbacks
+    make_engine():          a new Engine for a given URL
+    make_session_factory(): a sessionmaker bound to a new Engine for a given URL
+    get_engine():           the application's default Engine, built once
+    get_session():          a new Session bound to that default Engine
 
 The table is created and loaded by load_data.py. This module maps it and does
 not create, alter, or copy it: there is one applicants table, read by both the
@@ -18,13 +21,19 @@ Usage:
     python3 models.py    # verify the model against the live table
 """
 
+import os
 from datetime import date
 from functools import lru_cache
 
 from sqlalchemy import Date, Engine, Float, Integer, Text, URL, create_engine, func, inspect, select
+from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
 from load_data import get_db_config
+
+# psycopg 3. A bare "postgresql://" URL sends SQLAlchemy looking for psycopg2,
+# which this project does not install, so the driver is always named.
+DRIVER = "postgresql+psycopg"
 
 
 class Base(DeclarativeBase):
@@ -65,31 +74,71 @@ class Applicant(Base):
                 f"term={self.term!r}, status={self.status!r})")
 
 
-@lru_cache(maxsize=1)
-def get_engine() -> Engine:
-    """Return the application's Engine, created once on first use.
+def build_url(database_url=None):
+    """Return the SQLAlchemy URL for the database.
 
-    Built from the same PG* environment variables (via .env) as load_data.py,
-    so the ORM and the raw SQL code reach the same database and table. URL.create
-    escapes the password safely, which string-formatting a URL would not.
-    Created lazily rather than at import, so importing this module has no side
-    effects when the variables are unset.
+    An explicit argument wins, then DATABASE_URL, then the PG* settings
+    load_data.py reads, so the ORM and the raw SQL code always reach the same
+    database and table. URL.create escapes the password safely, which
+    string-formatting a URL would not.
+
+    Args:
+        database_url: an explicit URL, as create_app() passes in tests.
+
+    Returns:
+        sqlalchemy.URL: the connection URL, with the psycopg 3 driver named.
     """
+    url = database_url or os.environ.get("DATABASE_URL")
+    if url:
+        parsed = make_url(url)
+        # Respect a driver the caller named; supply ours when they named none.
+        return parsed if "+" in parsed.drivername else parsed.set(drivername=DRIVER)
+
     config = get_db_config()
-    url = URL.create(
-        drivername="postgresql+psycopg",  # psycopg 3; plain "postgresql" means psycopg2
+    return URL.create(
+        drivername=DRIVER,
         username=config["user"],
         password=config["password"],
         host=config["host"],
         port=int(config["port"]),
         database=config["dbname"],
     )
-    return create_engine(url, pool_pre_ping=True)
+
+
+def make_engine(database_url=None) -> Engine:
+    """Return a new Engine for the given URL.
+
+    pool_pre_ping checks a pooled connection before handing it out, so a
+    connection the server has since closed surfaces as a reconnect rather
+    than a failed request.
+    """
+    return create_engine(build_url(database_url), pool_pre_ping=True)
+
+
+def make_session_factory(database_url=None) -> sessionmaker[Session]:
+    """Return a sessionmaker bound to a new Engine for the given URL.
+
+    create_app() calls this, which is what lets a test point the whole
+    application at a disposable database without touching the environment.
+    Deliberately uncached: two callers asking for different URLs must get
+    factories reaching different databases.
+    """
+    return sessionmaker(bind=make_engine(database_url), expire_on_commit=False)
+
+
+@lru_cache(maxsize=1)
+def get_engine() -> Engine:
+    """Return the application's default Engine, created once on first use.
+
+    Created lazily rather than at import, so importing this module has no side
+    effects when no connection settings are set.
+    """
+    return make_engine()
 
 
 @lru_cache(maxsize=1)
 def _session_factory() -> sessionmaker[Session]:
-    """Return the sessionmaker bound to the application's Engine."""
+    """Return the sessionmaker bound to the application's default Engine."""
     return sessionmaker(bind=get_engine(), expire_on_commit=False)
 
 

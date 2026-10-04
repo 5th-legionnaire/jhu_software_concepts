@@ -181,6 +181,18 @@ h3 {
   text-align: right;
 }
 
+/* Every answer is labelled "Answer:". Set small and quiet so the label reads
+   as a tag on the figure rather than competing with it. */
+.answer-label {
+  font-weight: 400;
+  font-size: 0.75rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--muted);
+  vertical-align: 0.35em;
+  margin-right: 0.1rem;
+}
+
 .basis {
   grid-column: 1 / -1;
   margin: 0.4rem 0 0;

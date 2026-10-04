@@ -48,9 +48,13 @@ sphinx-build -b html docs docs/_build/html
   `integration`. An unmarked test is a rubric deduction.
 - `DATABASE_URL` is the primary connection setting. The existing `PG*`
   variables stay as a fallback so Module 3 behavior is unchanged.
-- Coverage is `--cov-fail-under=100`. Prefer dependency injection over
-  `# pragma: no cover`. Where a pragma is unavoidable (driver bootstrap,
-  `if __name__ == "__main__"` blocks), add a one-line reason beside it.
+- Coverage is `--cov-fail-under=100`, but the number is a proxy and the
+  grader reads the tests. 43 of 100 points are for tests that verify specific
+  behavior; 4 are for the coverage figure. Never satisfy the gate by executing
+  a line without asserting on its result, and never widen `# pragma: no cover`
+  to clear a stubborn file. Prefer dependency injection. Where a pragma is
+  genuinely unavoidable (driver bootstrap, `if __name__ == "__main__"`
+  blocks), add a one-line reason beside it and keep the total under ten.
 
 ## Style
 

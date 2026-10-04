@@ -1,7 +1,7 @@
 """
 pull_data.py: Pull newly posted Grad Cafe entries into PostgreSQL (Part 9).
 
-EN 605.256 Modern Software Concepts in Python, Module 3.
+EN 605.256 Modern Software Concepts in Python, Modules 3 and 4.
 Joshua Latz (jlatz1)
 
 Reuses the Module 2 code rather than reimplementing it:
@@ -10,9 +10,23 @@ Reuses the Module 2 code rather than reimplementing it:
     3. llm_hosting/  standardize program and university, in its own environment
     4. load_data.py  insert them; ON CONFLICT (p_id) DO NOTHING protects existing rows
 
-app.py runs this file as a subprocess and shows the last line it prints on the
-page, so every line printed here is written for the person who clicked Pull Data.
-It can also be run directly: python3 pull_data.py
+Contains:
+    PullError:            a pull that stopped before writing anything
+    run_pull():           the seam the Flask route and the tests share
+    scrape_new_records(): the real scraper, steps 1 to 3 above
+    load_records():       the real loader, step 4 above
+    main():               run one pull from the command line
+
+Module 4 split this file into those seams. Module 3 ran the whole pull as an
+opaque subprocess, which no test could drive and no coverage tool could see
+into. Now the Flask route calls run_pull() with a scraper and a loader, both of
+which default to the real implementations and both of which a test replaces
+with a plain callable. Every outward dependency reaches this module as an
+argument: the browser, the LLM standardizer, the database connection, and even
+the politeness delay between page requests.
+
+Usage:
+    python3 pull_data.py
 """
 
 import json
@@ -29,43 +43,100 @@ from sqlalchemy import func, select
 
 import clean
 import scrape
-from load_data import create_connection, get_db_config, load_data
+from load_data import create_connection, create_table, get_db_config, insert_records
 from models import Applicant, get_session
 
-MODULE_DIR = os.path.dirname(os.path.abspath(__file__))
-WORK_DIR = os.path.join(MODULE_DIR, "pull_work")          # gitignored
+# The working directory, the bulk JSON, and the LLM standardizer all live in
+# module_4/, one level above this file's src/.
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+WORK_DIR = os.path.join(PROJECT_DIR, "pull_work")          # gitignored
 PAGES_DIR = os.path.join(WORK_DIR, "pages")
 NEW_RECORDS = os.path.join(WORK_DIR, "new_records.json")
 STANDARDIZED = os.path.join(WORK_DIR, "standardized.json")
 LOG_PATH = os.path.join(WORK_DIR, "pull_data.log")
 
-LLM_DIR = os.path.join(MODULE_DIR, "llm_hosting")
+LLM_DIR = os.path.join(PROJECT_DIR, "llm_hosting")
 LLM_PYTHON = os.path.join(LLM_DIR, ".venv", "bin", "python")
 LLM_ENV = {"N_GPU_LAYERS": "999", "N_BATCH": "512"}        # tuned in Module 2
 
 RESULT_ID = re.compile(r"/result/(\d+)")
 
+# Seconds between page requests, matching Module 2's politeness delay.
+PAGE_DELAY = 2
 
-def _newest_in_database():
+
+class PullError(RuntimeError):
+    """A pull that stopped before loading anything.
+
+    The message is written for the person who clicked Pull Data, because the
+    Flask route returns it to the page. Raising rather than returning a code
+    is what lets the route answer with a non-200 and an explanation while
+    guaranteeing the database was never written to.
+    """
+
+
+def run_pull(scraper, loader):
+    """Run one pull: ask the scraper for records, hand them to the loader.
+
+    This is the only path into a pull. The Flask route calls it with the real
+    implementations below; a test calls it with two plain callables, so no page
+    is rendered and no network request is made. Because the loader runs in a
+    single transaction, a scraper that raises leaves the database untouched.
+
+    Args:
+        scraper: callable taking no arguments and returning applicant records.
+        loader: callable taking those records and returning the number inserted.
+
+    Returns:
+        int: rows newly inserted.
+
+    Raises:
+        PullError: propagated from the scraper or the loader. Nothing was written.
+    """
+    return loader(scraper())
+
+
+# The real scraper: Grad Cafe -> parsed, standardized records
+
+def _newest_in_database(session_factory):
     """Return (highest p_id, latest date_added) currently in the database."""
-    with get_session() as session:
+    with session_factory() as session:
         return session.execute(
             select(func.max(Applicant.p_id), func.max(Applicant.date_added))).one()
 
 
-def _scrape_new_pages(newest_id, newest_date):
+def _start_browser():
+    """Open the Chrome window Module 2's scraper drives.
+
+    A visible window is deliberate: Grad Cafe sits behind Cloudflare, and a
+    verification check has to be cleared by hand the first time.
+    """
+    return scrape._start_browser(headless=False)
+
+
+def _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=time.sleep):
     """Save result pages, newest first, until reaching an entry already in the database.
 
     Grad Cafe lists entries newest first and result ids increase over time, so
     the first page holding an id at or below the database's highest id is the
-    last one with anything new. Returns False if a page could not be fetched.
+    last one with anything new.
+
+    Args:
+        newest_id: highest p_id already in the database.
+        newest_date: latest date_added already in the database.
+        browser_factory: callable returning a Selenium driver.
+        sleep: the delay between page requests. Injected so a test passes a
+            no-op rather than waiting, which is why this suite needs no sleep().
+
+    Returns:
+        bool: False if a page could not be fetched, True otherwise.
     """
     shutil.rmtree(PAGES_DIR, ignore_errors=True)
     os.makedirs(PAGES_DIR)
     added_start = (newest_date - timedelta(days=1)).isoformat()
     added_end = (date.today() + timedelta(days=1)).isoformat()
 
-    driver = scrape._start_browser(headless=False)
+    driver = browser_factory()
     page, cursor = 0, None
     try:
         while True:
@@ -82,21 +153,34 @@ def _scrape_new_pages(newest_id, newest_date):
             cursor = scrape._next_cursor(html)
             if min(ids) <= newest_id or cursor is None:
                 return True
-            time.sleep(2)                                   # same politeness delay as Module 2
+            sleep(PAGE_DELAY)
     finally:
         driver.quit()
 
 
-def _standardize(records):
-    """Run the provided LLM standardizer over the new records. Returns True on success."""
+def _standardize(records, run=subprocess.run):
+    """Run the provided LLM standardizer over the new records.
+
+    Args:
+        records: the records to standardize.
+        run: the subprocess runner. Injected so a test can stand in for the
+            LLM environment without launching it.
+
+    Returns:
+        list[dict] | None: the standardized records, or None if the
+        standardizer failed or returned a different number of records than it
+        was given.
+    """
+    os.makedirs(WORK_DIR, exist_ok=True)
     with open(NEW_RECORDS, "w", encoding="utf-8") as out:
         json.dump(records, out, ensure_ascii=False)
-    result = subprocess.run(
+
+    result = run(
         [LLM_PYTHON, "app.py", "--file", NEW_RECORDS, "--stdout"],
         cwd=LLM_DIR, env={**os.environ, **LLM_ENV}, capture_output=True, text=True, check=False)
     if result.returncode != 0:
         print(result.stderr[-2000:])
-        return False
+        return None
 
     # The standardizer may write a JSON array or one JSON object per line.
     text = result.stdout.strip()
@@ -106,53 +190,110 @@ def _standardize(records):
         standardized = [json.loads(line) for line in text.splitlines() if line.strip()]
     with open(STANDARDIZED, "w", encoding="utf-8") as out:
         json.dump(standardized, out, ensure_ascii=False)
-    return len(standardized) == len(records)
+
+    return standardized if len(standardized) == len(records) else None
 
 
-def main():
-    """Run one pull. The last line printed is the result shown on the page."""
-    newest_id, newest_date = _newest_in_database()
+def scrape_new_records(session_factory=None, browser_factory=None, standardize=None):
+    """Fetch, parse, and standardize every Grad Cafe entry newer than the database's newest.
+
+    This is the default scraper create_app() injects. Each dependency is an
+    argument so a test can exercise this orchestration without a browser, an
+    LLM, or a network.
+
+    Args:
+        session_factory: returns a Session, for reading the newest loaded entry.
+        browser_factory: returns a Selenium driver.
+        standardize: takes records and returns standardized records, or None.
+
+    Returns:
+        list[dict]: standardized records, empty when Grad Cafe has nothing new.
+
+    Raises:
+        PullError: when the database is empty, Grad Cafe did not return
+            results, or the standardizer failed. Nothing has been written.
+    """
+    session_factory = session_factory or get_session
+    browser_factory = browser_factory or _start_browser
+    standardize = standardize or _standardize
+
+    newest_id, newest_date = _newest_in_database(session_factory)
     if newest_id is None:
-        print("The database is empty. Run load_data.py before pulling new entries.")
-        return 1
+        raise PullError("The database is empty. Run load_data.py before pulling new entries.")
 
-    if not _scrape_new_pages(newest_id, newest_date):
-        print("Stopped: Grad Café did not return results. If a verification check appeared, "
-              "complete it in the Chrome window, then click Pull Data again. "
-              "No entries were added.")
-        return 1
+    if not _scrape_new_pages(newest_id, newest_date, browser_factory):
+        raise PullError(
+            "Grad Café did not return results. If a verification check appeared, complete "
+            "it in the Chrome window, then click Pull Data again. No entries were added.")
 
     print("Reading the new pages.")
     records = [r for r in clean.clean_data(PAGES_DIR)
                if (m := RESULT_ID.search(r["url"])) and int(m.group(1)) > newest_id]
     if not records:
-        print("Grad Café has no new entries since the newest one in the database.")
-        return 0
+        return []
 
     if not os.path.exists(LLM_PYTHON):
-        print("Stopped: the LLM standardizer's environment was not found at llm_hosting/.venv. "
-              "Set it up as described in the README (section 3.4). No entries were added.")
-        return 1
-    print(f"Standardizing {len(records):,} new entries with the LLM.")
-    if not _standardize(records):
-        print("Stopped: the LLM standardizer failed. No entries were added. "
-              "Details are in pull_work/pull_data.log.")
-        return 1
+        raise PullError(
+            "The LLM standardizer's environment was not found at llm_hosting/.venv. Set it "
+            "up as described in the README (section 3.4). No entries were added.")
 
-    print(f"Adding {len(records):,} new entries to the database.")
-    connection = create_connection(get_db_config())
+    print(f"Standardizing {len(records):,} new entries with the LLM.")
+    standardized = standardize(records)
+    if standardized is None:
+        raise PullError(
+            "The LLM standardizer failed. No entries were added. Details are in "
+            "pull_work/pull_data.log.")
+    return standardized
+
+
+# The real loader: records -> PostgreSQL
+
+def load_records(records, connect=None):
+    """Insert records into PostgreSQL in one transaction.
+
+    This is the default loader create_app() injects. create_table() runs first
+    and is a no-op on an existing table, so a pull against a fresh database
+    does not require load_data.py to have been run.
+
+    Args:
+        records: standardized applicant records.
+        connect: returns an open psycopg connection, or None on failure.
+
+    Returns:
+        int: rows newly inserted; 0 when every record was already present.
+
+    Raises:
+        PullError: when the database could not be reached. Nothing was written.
+    """
+    if not records:
+        return 0
+
+    connect = connect or (lambda: create_connection(get_db_config()))
+    connection = connect()
     if connection is None:
-        print("Stopped: the database could not be reached. No entries were added.")
-        return 1
+        raise PullError("The database could not be reached. No entries were added.")
     try:
-        inserted = load_data(connection, STANDARDIZED)
+        create_table(connection)
+        return insert_records(connection, records)
     finally:
         connection.close()
+
+
+def main():
+    """Run one pull from the command line. Returns the process exit status."""
+    try:
+        inserted = run_pull(scrape_new_records, load_records)
+    except PullError as stopped:
+        print(f"Stopped: {stopped}")
+        return 1
+    if inserted == 0:
+        print("Grad Café has no new entries since the newest one in the database.")
+        return 0
     print(f"Added {inserted:,} new entries. Click Update Analysis to see them in the results.")
     return 0
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - command line entry point
     try:
         sys.exit(main())
     except Exception:  # keep the last line readable even on an unexpected error

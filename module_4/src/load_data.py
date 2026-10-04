@@ -7,9 +7,11 @@ EN 605.256 Modern Software Concepts in Python, Module 3.
 Joshua Latz (jlatz1)
 
 Contains:
-    create_connection(): open a connection using PG* settings from the environment or .env
+    get_db_config():     connection settings from DATABASE_URL, or the PG* fallbacks
+    create_connection(): open a connection using those settings
     execute_query():     run a single statement in its own transaction
     create_table():      create the applicants table and attach its column descriptions
+    insert_records():    load records already in memory, in one transaction
     load_data():         read records back from a JSON file and load them into a PostgreSQL database
 
 Usage:
@@ -21,6 +23,7 @@ import os
 import re
 import sys
 from datetime import datetime
+from urllib import parse
 
 import psycopg
 from psycopg import OperationalError, sql
@@ -28,24 +31,63 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-DEFAULT_DATA_FILE = os.path.join(
-    os.path.dirname(os.path.abspath(__file__)), "llm_extend_applicant_data.json"
-)
+# The bulk JSON lives in module_4/data/, one level above this file's src/.
+PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_DATA_FILE = os.path.join(PROJECT_DIR, "data", "llm_extend_applicant_data.json")
+
+PG_ENV_KEYS = {
+    "host": "PGHOST",
+    "port": "PGPORT",
+    "dbname": "PGDATABASE",
+    "user": "PGUSER",
+    "password": "PGPASSWORD",
+}
 
 
-def get_db_config():
+def _config_from_url(url):
+    """Split a database URL into the keyword arguments psycopg.connect takes.
+
+    Accepts the SQLAlchemy spelling with a driver suffix
+    ("postgresql+psycopg://user:pass@host:5432/db") as well as a plain
+    "postgresql://", so one variable serves both the psycopg code here and the
+    ORM in models.py. The user name and password are percent-decoded, which is
+    what makes a password containing "@" or "/" safe to carry in the URL.
+    """
+    parts = parse.urlsplit(url)
+    return {
+        "host": parts.hostname or "localhost",
+        "port": str(parts.port or 5432),
+        "dbname": parse.unquote(parts.path).lstrip("/") or None,
+        "user": parse.unquote(parts.username or ""),
+        "password": parse.unquote(parts.password or ""),
+    }
+
+
+def get_db_config(database_url=None):
     """Read connection settings from the environment (populated from .env if present).
 
+    DATABASE_URL is the primary setting, so one variable configures both this
+    module and the ORM, and a test can point the whole application at a
+    disposable database. The PG* variables Module 3 used remain as a fallback,
+    so an existing .env keeps working unchanged.
+
     Read at call time rather than import time, so importing this module
-    (for example from a test) does not fail when the variables are unset.
+    (for example from a test) does not fail when nothing is set.
+
+    Args:
+        database_url: an explicit URL, as create_app() passes when a test
+            overrides the configuration. Takes precedence over the environment.
+
+    Returns:
+        dict: host, port, dbname, user, and password for psycopg.connect().
+
+    Raises:
+        KeyError: when no URL is given or set and a PG* variable is missing.
     """
-    return {
-        "host": os.environ["PGHOST"],
-        "port": os.environ["PGPORT"],
-        "dbname": os.environ["PGDATABASE"],
-        "user": os.environ["PGUSER"],
-        "password": os.environ["PGPASSWORD"],
-    }
+    url = database_url or os.environ.get("DATABASE_URL")
+    if url:
+        return _config_from_url(url)
+    return {key: os.environ[name] for key, name in PG_ENV_KEYS.items()}
 
 
 def create_connection(config):
@@ -273,16 +315,23 @@ def _count_rows(connection):
 
 # Loader
 
-def load_data(connection, path=DEFAULT_DATA_FILE):
-    """Read records back from a JSON file and load them into a PostgreSQL database.
+def insert_records(connection, records):
+    """Load records already held in memory into the applicants table.
 
-    All inserts run in one transaction: either the whole file loads or
-    nothing does. psycopg 3's executemany() pipelines the statements, so
-    30,000 rows need no manual batching. Returns the number of rows newly inserted, which is 0
-    on a rerun against an already-loaded table.
+    All inserts run in one transaction: either every record lands or none
+    does, so a failure part way through leaves no partial write. psycopg 3's
+    executemany() pipelines the statements, so 30,000 rows need no manual
+    batching. ON CONFLICT (p_id) DO NOTHING makes a repeated pull a no-op
+    rather than a duplicate, which is the uniqueness policy the analysis
+    relies on.
+
+    Args:
+        connection: an open psycopg connection, as returned by create_connection().
+        records: Module 2 applicant records, using their JSON key names.
+
+    Returns:
+        int: rows newly inserted, which is 0 when every record was already present.
     """
-    records = _read_records(path)
-
     rows, skipped = [], 0
     for record in records:
         row = _prepare_record(record)
@@ -303,6 +352,19 @@ def load_data(connection, path=DEFAULT_DATA_FILE):
         f"{skipped} skipped (no result id in url)"
     )
     return inserted
+
+
+def load_data(connection, path=DEFAULT_DATA_FILE):
+    """Read records back from a JSON file and load them into a PostgreSQL database.
+
+    Args:
+        connection: an open psycopg connection.
+        path: a JSON array of Module 2 applicant records.
+
+    Returns:
+        int: rows newly inserted, 0 on a rerun against an already-loaded table.
+    """
+    return insert_records(connection, _read_records(path))
 
 
 def main():
