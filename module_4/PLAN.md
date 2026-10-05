@@ -327,7 +327,7 @@ address.
 `working-directory: module_4`. Push, confirm a green run, screenshot it to
 `module_4/actions_success.png`.
 
-## Phase 4: docs (content COMPLETE; publishing still open)
+## Phase 4: docs (COMPLETE)
 
 Content done: `orm_queries.py`'s twelve runner functions (`q1` through
 `uq2`, `dataset_summary`, `all_results`) all have docstrings now, mirroring
@@ -360,15 +360,16 @@ not introduced by anything in this phase, and harmless either way:
 `.readthedocs.yaml` already sets `fail_on_warning: false`, and they do not
 appear under the actual build command at all, only under `-n`.
 
-Still open, by design (would publish an unfinished site otherwise):
-
-- Make the repo public. Checked first: `.env` has never been committed in
-  this repo's history (`git log --all --diff-filter=A` for it is empty),
-  and no password/secret-shaped string is committed anywhere; going public
-  exposes ordinary coursework, not credentials.
-- Connect Read the Docs (needs the public repo first) and link the
-  published URL from `module_4/README.md`, replacing its two "pending"
-  notes (the header line and the Documentation section).
+Published. The repo went public (checked first: `.env` has never been
+committed in this repo's history, and no password/secret-shaped string is
+committed anywhere, so going public exposed ordinary coursework, not
+credentials), Read the Docs connected via its GitHub App after the repo's
+OAuth App connection needed a resync to see it, and the first build went
+green on the first try at
+<https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/>
+(verified live, not just assumed from the build log). Linked from both
+places in `module_4/README.md`: the header line and the `## Documentation`
+section.
 
 Section titles the source references by name, confirmed present in the
 README: **Additional columns** (`models.py`), **LLM standardizer setup**

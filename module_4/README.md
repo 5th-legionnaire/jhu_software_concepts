@@ -4,7 +4,7 @@
 **JHED ID:** jlatz1
 **Module:** Module 4, Assignment: Testing and Documentation
 **Repository:** `git@github.com:5th-legionnaire/jhu_software_concepts.git`. This assignment lives under `module_4/`.
-**Documentation:** _Read the Docs link pending; added when the docs are published._
+**Documentation:** <https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/>
 **Python:** 3.14.6 (CPython, macOS)
 **PostgreSQL:** 18.6 (Homebrew)
 
@@ -656,7 +656,7 @@ for `WebDriverWait`'s own internal sleep are the only ways to reach.
 
 ## Documentation
 
-_Pending: the published Read the Docs URL._
+Published at <https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/>.
 
 The Sphinx project lives in `docs/`. To build it locally:
 
