@@ -1,399 +1,763 @@
-# Module 4 execution plan
+# Module 5 execution plan
 
-EN 605.256, Module 4: Pytest and Sphinx. 100 points. Source of truth is
-`assignment/Module 4 - Testing and Documentation Assignment.pdf`.
+EN 605.256, Module 5: Software Assurance and Secure SQL (SQLi Defense).
+100 points plus 5 extra credit. Joshua Latz (jlatz1).
 
-## Phase 0: refactor contract (COMPLETE)
+Source of truth: `assignment/Module 5 - Software Assurance + Secure SQL (SQLi Defense) Assignment.pdf`.
+When this plan and the PDF disagree, the PDF wins and this plan gets an amendment.
 
-The Module 3 app could not satisfy the rubric as written. What was built, and
-the three places this plan was amended along the way.
+**Status:** v2, approved for implementation. Baseline is `module_4` at commit `1ecf2c9`.
+**Hard deadline:** Mon 2026-10-05, 23:59 ET (extension). Canvas zip and GitHub push are both due by then.
 
-### The injection seam
+## How to use this plan (for Claude Code)
 
-```python
-create_app(scraper=None, loader=None, query=None, runner=None,
-           database_url=None, testing=False)
-```
+1. **Phases run in order, and every phase is gated.** Before starting a phase, confirm its **Entry**
+   checks. A phase is done only when `scripts/gate.sh <N>` passes (section 3) and the phase's **Exit**
+   checks hold. Then commit as `M5 phase N: <title>`, append a row to the Gate Log (section 11), and
+   mark the heading `(COMPLETE)`.
+2. **Every design change from Module 4 gets a Change Register entry** (section 4) with a crisp
+   rationale and the test IDs that verify it. The gate script refuses to pass if a change listed for
+   the current phase has no rationale, no README section, or a test ID that pytest cannot collect.
+   No code change lands without its register row.
+3. If the plan turns out to be wrong, stop, record a numbered **Amendment** under the phase (as
+   `module_4/PLAN.md` did), then continue.
+4. Never modify `module1`, `module_2`, `module_3`, or `module_4`. `.github/workflows/tests.yml` stays
+   untouched. `.readthedocs.yaml` is repointed only in Phase 11.
+5. Style: match the Module 3 and 4 code. Each module gets a docstring with a "Contains:" block, public
+   functions get Google-style docstrings, and comments explain why rather than what. Do not use em
+   dashes or double hyphens in prose, docstrings, or comments. **New files must lint clean
+   (10.00/10) the moment they are created.** Carried-over files are fixed by Phase 6.
 
-Every argument defaults to the real implementation, so `python3 src/app.py` is
-unchanged. The callables:
+---
 
-| Argument | Shape | Real default |
-|----|----|----|
-| `scraper` | `() -> list[dict]` | `pull_data.scrape_new_records` |
-| `loader` | `(records) -> int` | `pull_data.load_records` |
-| `query` | `() -> {"summary":…, "results":…}` | ORM read via `make_query` |
-| `runner` | `(job) -> int \| None` | `run_in_background`, or `run_inline` when testing |
+## 0. Decisions locked
 
-**Amendment 1: `runner` was added.** This plan previously asked for an
-in-process `run_pull` *and* for the subprocess to stay as the default injected
-behavior. Those contradict: a subprocess returns an exit code, not rows, so the
-route cannot thread scraper to loader through it. Splitting *how* a pull
-executes (`runner`) from *what* it does (`scraper`, `loader`) satisfies both
-intents. The real app gets a daemon thread, so a multi-minute pull still does
-not block the page; tests get `run_inline`, so a `POST /pull-data` has finished
-pulling by the time it returns and there is nothing to wait on.
+| # | Decision | Choice | Why |
+|---|---|---|---|
+| D1 | DB role model | **Two roles:** `gradcafe_owner` (DDL, bulk load) and `gradcafe_app` (runtime) | Pull Data writes, so runtime cannot be read-only. A third role adds a second connection config for little marginal assurance. |
+| D2 | User-input surface | **JSON API only:** `GET /api/applicants` | The current app accepts no user input that reaches SQL. This adds the smallest surface that can demonstrate Identifier, Placeholder, LIMIT clamping, and malicious-input handling. |
+| D3 | Snyk CI gate | `snyk test --severity-threshold=high` **fails** the job. Snyk Code runs **report-only**. | A real shift-left gate, without a low-severity transitive finding blocking the build. |
+| D4 | Snyk account | **None yet.** Signup happens on a parallel track (section 2). | |
+| D5 | Env var contract | `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`, `DB_PASSWORD` are primary. `DATABASE_URL` is an optional override. `PG*` is removed. | These are the assignment's literal names. CI and tests need the single-URL override. |
+| D6 | Pylint policy | Fix the code. **Zero** inline `# pylint: disable`. `.pylintrc` carries only `source-roots` and `exclude-too-few-public-methods` for SQLAlchemy declarative bases. | A pylintrc that raises thresholds reads as gaming the score. Every baseline message is fixable in code (the largest class was verified). |
+| D7 | Dependency source of truth | `setup.py` (`install_requires` plus a `dev` extra). `requirements.txt` is a fully pinned lock from `uv pip compile`. | `uv pip sync` does **not** resolve transitive dependencies. Module 4's top-level-only file would produce an environment without Werkzeug or Jinja2. |
+| D8 | Packaging shape | Flat modules: `package_dir={"": "src"}`, `py_modules=[...]`. The **supported install is `pip install -e .`**. | Preserves the Module 4 import contract. Known limitation: a non-editable `pip install .` would not carry `templates/` and `static/`. The README states this. |
+| D9 | Entry module name | Keep `src/app.py`. | The expected tree is "should resemble", and the PDF's pydeps example uses `app.py`. |
+| D10 | Report | Built collaboratively in Phase 10, format and toolchain decided then. | |
+| D11 | Read the Docs | Repoint `.readthedocs.yaml` to `module_5` as the **last** step (Phase 11), after tagging the Module 4 commit so its docs stay reachable as an RTD version. | Repointing replaces what `latest` serves. The tag keeps the Module 4 docs live while that grade is pending. |
 
-**Amendment 2: `query` injection is load-bearing, not a nicety.** Because the
-page's entire database read is one injected callable, `test_flask_page.py` and
-`test_analysis_format.py` run with **no PostgreSQL at all**. Only the `db` and
-`integration` markers need a database, which is what keeps CI's Postgres
-service off the critical path for 7 of the 20 tests.
+---
 
-### The JSON contract
+## 1. Baseline findings (measured, not assumed)
 
-Chosen: **always JSON**, with the page's two buttons calling the routes via
-`fetch()` and reloading on success. Content negotiation on `Accept` was
-rejected because Flask's test client sends `Accept: */*` by default, so the
-obvious `client.post("/pull-data")` would have received a 302.
+Measured on Python 3.14.6, pylint 4.1.2 / astroid 4.3.3, pydeps 3.0.9, Graphviz `dot`, psycopg 3.3.6.
 
-```
-POST /pull-data        200 {"ok": true, "inserted": n}    finished in-request
-                       202 {"ok": true, "started": true}  running in background
-                       409 {"busy": true}                 a pull is already running
-                       500 {"ok": false, "error": text}   stopped, nothing written
-POST /update-analysis  200 {"ok": true, "total": n}
-                       409 {"busy": true}
-                       503 {"ok": false, "error": text}   database unreachable
-GET  /analysis         200 the page   (GET / is an alias on the same view)
-                       503 the page, rendered with an error notice
-```
+**Pylint on `module_4/src`: 8.36/10, 51 messages.**
 
-`flash()` and `session` are gone with the redirects. The page's status line now
-comes from `PullState.last`, server-rendered, and from the fetch response.
+| Count | Message | Location | Fix (change ID) |
+|---|---|---|---|
+| 19 | E1102 `not-callable` | `func.count()` in `orm_queries.py`, `models.py` | Known astroid false positive on `sqlalchemy.func`. Import from `sqlalchemy.sql.functions`. **Verified to clear.** (CHG-16) |
+| 9 | C0301 `line-too-long` | `query_data.py` SQL, `app.py` | Removed by the Phase 3 rewrite. Wrap the rest. (CHG-05, CHG-17) |
+| 6 | C0304 `missing-final-newline` | 6 files | `.editorconfig` plus fixes (CHG-17) |
+| 5 | W0212 `protected-access` | `pull_data.py` → `scrape._start_browser`, `_fetch_html`, `_build_url`, `_page_path`, `_next_cursor` | Promote to public API (CHG-14) |
+| 2 | E1136 `unsubscriptable-object` | `sessionmaker[Session]` annotations | Quoted annotation. **Verified to clear.** (CHG-16) |
+| 2 | W0718 `broad-exception-caught` | `app.py:337`, `pull_data.py:317` | Named exceptions plus a `finally` (CHG-10) |
+| 2+2 | R0913/R0917 too many (positional) args | `create_app` (6), `scrape_data` (9) | Parameter objects (CHG-09, CHG-15) |
+| 1 | R0914 `too-many-locals` | `scrape_data` | Extract the page loop (CHG-15) |
+| 2 | R0903 `too-few-public-methods` | `Base`, `Applicant` | `.pylintrc` exclusion (CHG-17) |
+| 1 | R1711 `useless-return` | `app.py:110` | Remove (CHG-17) |
 
-### Observable busy state
+**SQL inventory.**
 
-`app.config["PULL_STATE"]` holds a `PullState` with a plain `busy` bool and a
-`last` status dict. A test sets `state.busy = True` and posts. Module 3
-inferred busy from `subprocess.poll()`, which no test could drive without a
-real subprocess to wait on. `pull_data._scrape_new_pages` also takes its
-politeness delay as a `sleep` argument, so no test anywhere needs `sleep()`.
+| File | Statement | Problem |
+|---|---|---|
+| `query_data.py` | `Q3`, `Q4`, `Q6`, `Q7`, `Q8`, `Q9`, `UQ1` | Built with **f-strings** (constants, but the rubric line is absolute) |
+| `query_data.py` | All 11 | No LIMIT. Plain strings. `_one()` and `_rows()` take a raw string. |
+| `load_data.py` | `_count_rows` | No LIMIT, plain string |
+| `load_data.py` | `INSERT_APPLICANT`, `CREATE_APPLICANTS_TABLE` | Parameterized but not composed |
+| `orm_queries.py` | 12 builders, `dataset_summary` | No `.limit()` (only `fetch_one` has one) |
+| `pull_data.py` | newest-entry select | No `.limit()` |
+| `models.py` | `_verify_mapping` count | No `.limit()` |
 
-Update Analysis is now **gated** during a pull, per the rubric. Module 3 allowed
-it. Note in `docs/operations.rst` that the gate is a reporting choice, not a
-correctness one: the loader's single transaction already made a concurrent read
-safe, but a refresh taken mid-pull reports a total that is about to change.
+**User input reaching SQL today: none.** D2 fixes this.
 
-### Configuration
+**Least-privilege blocker:** `pull_data.load_records()` calls `create_table()` on every pull.
+`CREATE TABLE IF NOT EXISTS` checks schema CREATE privilege before it checks whether the table exists,
+and `COMMENT ON` requires ownership. Under `gradcafe_app`, **Pull Data would fail** (CHG-11).
 
-`DATABASE_URL` is primary, with the `PG*` variables as fallback, in two places
-that now mirror each other:
+**Verified in a spike:**
+- pydeps plus Graphviz build `dependency.svg` from `src/app.py` on 3.14.
+- `uv pip compile setup.py --extra dev` yields a full 59-package lock including Werkzeug, Jinja2, pylint and pydeps.
+- psycopg `Composed.as_string(None)` renders without a connection, so builders are unit-testable offline.
+- A hostile identifier renders safely quoted: `"gpa""; DROP TABLE x; --"`.
 
-- `load_data.get_db_config(database_url=None)` -> psycopg kwargs
-- `models.build_url(database_url=None)` -> SQLAlchemy URL
+---
 
-A URL spelled `postgresql://` gets the `+psycopg` driver supplied; one that
-names a driver keeps it. User names and passwords are percent-decoded, so a
-password containing `@` is safe in the URL. `models.make_session_factory(url)`
-is uncached and is what lets `create_app(database_url=...)` redirect the whole
-application; the `lru_cache`d `get_engine`/`get_session` stay for the CLI
-scripts, preserving Module 3 behavior.
+## 2. Deadline execution (tonight)
 
-### Template
+The full plan is roughly 5 to 6 hours of work. Two things are wall-clock bound rather than effort
+bound, so they start **now, in parallel**, while Claude Code works Phases 0 to 3:
 
-- `data-testid="pull-data-btn"` and `data-testid="update-analysis-btn"`.
-- Every answer carries an `Answer:` label, as
-  `<span class="answer-label">Answer:</span>` prefixing the value. 16 on a
-  full page.
-- `<title>` and `<h1>` both contain `Analysis`.
-- **Amendment 3: the two-decimal rule had to reach further than the values.**
-  `_with_shares` computed `share_pct` to one decimal and the template printed
-  it into an `aria-label` ("1.3% of the dataset"), and `thin_pct` printed as a
-  bare `5%`. Both are readable page text, so both violated the SHALL NOT on
-  varying precision. Rows now also carry `share_text`, and the page gets
-  `thin_pct_text`, each through `fmt_pct`. CSS bar widths keep the numeric
-  `share_pct`: they are geometry, not analysis output.
+**Parallel track A, Josh (about 20 minutes):**
+1. Sign up at snyk.io with GitHub SSO (free plan).
+2. `brew tap snyk/tap && brew install snyk-cli && snyk auth`.
+3. In the Snyk org settings, **enable Snyk Code**. It is off by default, and `snyk code test` fails until it is on.
+4. Copy the API token, then `gh secret set SNYK_TOKEN -R 5th-legionnaire/jhu_software_concepts`.
+5. `brew install graphviz` if `dot -V` fails.
 
-### Also fixed in phase 0, not in the original plan
+**Parallel track B, Josh (about 10 minutes):** confirm local PostgreSQL superuser access
+(`psql -c "select current_user, rolsuper from pg_roles where rolname = current_user limit 1"`), since
+Phase 5 bootstraps the roles with it.
 
-- **The `module_4/.venv` was broken.** Its `pyvenv.cfg` still named `module_3`,
-  so `pip install` wrote into module_3's `site-packages`, and it had no
-  `pytest`, `pytest-cov`, `pytest-mock`, or `sphinx`. Recreated on 3.14.6
-  against `requirements.txt`.
-- **The module_3 to `src/` move broke four path constants**, all of which
-  resolved under `src/` and pointed at nothing:
-  `load_data.DEFAULT_DATA_FILE`, `pull_data.WORK_DIR`, `pull_data.LLM_DIR`, and
-  `app.PULL_LOG`. They now resolve from `module_4/` via a `PROJECT_DIR`
-  constant. `app.PULL_LOG` is gone entirely with the subprocess.
-- **`load_data.load_data()` was split**, so a pull can insert rows already in
-  memory: `insert_records(connection, records)` holds the transaction, and
-  `load_data(connection, path)` is now a thin file-reading wrapper over it.
-  Module 3's call signature is unchanged.
-- **`pull_data.load_records` calls `create_table` first**, so a pull against a
-  fresh database no longer requires `load_data.py` to have been run. It is
-  `CREATE TABLE IF NOT EXISTS`, so it stays a no-op in every other case.
-- `PullError` carries the "stopped, nothing written" messages that Module 3
-  returned as exit codes, so the route can put the reason in its 500 body.
+**Cut line.** If Phase 6 has not passed its gate by **22:30**, defer these to a post-submission
+commit. None of them carries rubric points on its own.
+- The CI `uv` matrix leg. The local `fresh_install_check.sh` still proves uv.
+- Sphinx `security.rst`.
+- The informational Snyk scan of `llm_hosting/`.
+- The full independent review in Phase 11. A checklist pass replaces it.
 
-## Phase 1: tests (COMPLETE)
+**Never cut:** any requirement row R1 to R38, any gate, any Change Register entry, XC1 to XC3.
 
-All 20 tests across the five required files pass:
-`pytest -m "web or buttons or analysis or db or integration"` → `20 passed`.
+**Submit by 23:30**, leaving a buffer for the Canvas upload and a CI rerun.
 
-### Two application fixtures, not one
+---
 
-The stubbed `conftest.py` had a single `app` fixture, built from
-`fake_scraper` and `fake_loader`. That cannot serve both halves of the suite:
-web, buttons, and analysis tests need zero PostgreSQL, but db and
-integration tests need rows to actually land and actually be queryable.
-Faking the loader rules out the first; using the real loader rules out the
-second, for the *same* fixture.
+## 3. Phase gates
 
-Resolved with two fixtures:
+### 3.1 Standard gate: `scripts/gate.sh <N>` (created in Phase 0)
 
-| Fixture | scraper | loader | query | Used by |
+Runs at the **exit** of every phase. Fails fast and prints which check failed.
+
+| # | Check | Command / rule |
+|---|---|---|
+| G1 | Full suite green, 100% coverage, strict markers | `pytest` (`pytest.ini`: `--cov-fail-under=100 --strict-markers`) |
+| G2 | Every test carries a marker | conftest collection hook fails any unmarked test (CHG-18) |
+| G3 | Pylint non-regressing | Score ≥ the previous gate's score, recorded in `.gate/scores`. From Phase 6 on: exactly 10.00 with zero messages. |
+| G4 | New files lint clean | Every `src/` file added since `1ecf2c9` scores 10.00 on its own |
+| G5 | No inline disables | `! grep -rn "pylint: disable" src` |
+| G6 | No secrets | `.env` not tracked (`! git ls-files --error-unmatch .env`), and no credential-shaped literal in `src/` or `tests/` (`scripts/check_secrets.py`) |
+| G7 | Change Register integrity | `scripts/check_change_register.py <N>`: every CHG row with phase ≤ N is marked `done`, has a rationale, has a README anchor (`#chg-XX`), and lists test node IDs that `pytest --collect-only -q` resolves |
+| G8 | Plan hygiene | Gate Log row appended. Phase heading marked `(COMPLETE)`. Amendments recorded if any. |
+| G9 | Phase-specific | `case $N` block in `gate.sh` with the phase's own exit checks below |
+
+### 3.2 Standard entry checks (every phase)
+
+- E1: Previous phase has a Gate Log row and its commit is `HEAD` (`git log -1 --format=%s` starts `M5 phase N-1`).
+- E2: Working tree clean (`git status --porcelain` empty).
+- E3: Active venv is `module_5/.venv` on Python 3.14.6 (`python -c "import sys; print(sys.prefix, sys.version)"`).
+- E4: The phase's own entry checks, listed under each phase.
+
+---
+
+## 4. Change Register (Module 4 → Module 5)
+
+Single source: `module_5/CHANGES.md`, in this format. The README's "Changes from Module 4" section has
+one subsection per row, anchored `#chg-XX`, carrying the rationale in two to four sentences:
+**problem → decision → trade-off accepted**. The report summarizes the table.
+
+| ID | Phase | Change | Rationale (crisp) | Verified by |
 |---|---|---|---|---|
-| `app` / `client` | `fake_scraper` | `fake_loader` (records calls, writes nothing) | `fake_query` (new) | `web`, `buttons`, `analysis` |
-| `db_client` | `fake_scraper` | real, against `clean_db` | real, against `clean_db` | `db`, `integration` |
+| CHG-01 | 1 | `setup.py` with flat `py_modules`. Editable install replaces conftest's `sys.path` hack. | Imports must resolve the same in local runs, tests, and CI. Path hacks hide packaging defects until a grader's machine. Flat modules keep Module 4's import contract. The cost is that non-editable installs lack templates, which is documented. | `test_packaging.py::test_modules_import_from_installed_location`, `::test_no_sys_path_mutation_in_conftest`; `fresh_install_check.sh` |
+| CHG-02 | 1 | `requirements.txt` becomes a full lock compiled from `setup.py`. Module 4's annotations move into `setup.py`. | `uv pip sync` installs exactly the file and resolves nothing, so a top-level-only file builds a broken environment. One source (setup.py) and one generated artifact cannot drift. Snyk sees the full tree. | `test_packaging.py::test_lock_pins_every_line`, `::test_lock_includes_tooling`, `::test_lock_includes_transitive_runtime`; CI uv leg |
+| CHG-03 | 2 | `DB_*` env contract, `DATABASE_URL` override, `PG*` removed, role-aware `get_db_config(role=)` | The assignment names `DB_*`. Two parallel contracts invite a misconfigured run that silently uses the wrong account. Role selection makes the owner/app split explicit at every call site. | `test_config.py::test_precedence_*`, `::test_owner_role_reads_owner_vars`, `::test_missing_var_names_variable_not_value` |
+| CHG-04 | 2 | Connection errors logged sanitized instead of printing the raw exception | libpq errors can echo host and user. Printing them to stdout puts connection details in logs and CI output. | `test_config.py::test_connection_error_message_is_sanitized` |
+| CHG-05 | 3 | `query_data.py`: f-string SQL replaced by builders returning `(sql.Composed, params)` and a single executor. Constants become bound params. | The rubric bans f-string SQL outright, and "constants only" is a policy reviewers cannot verify at a glance. Separating build from execute makes every statement inspectable offline and every execution path one function. | `test_sql_guard.py::test_no_sql_string_building`, `::test_every_execute_receives_composable`; `test_query_data.py::test_builder_snapshots`, `::test_parity_with_module_4` |
+| CHG-06 | 3 | INSERT and DDL composed from one `COLUMNS` tuple via `Identifier` and `Placeholder` | Two hand-maintained column lists (INSERT text and record mapping) can drift silently. Generating both from one tuple removes the class of bug. | `test_load_data.py::test_insert_builder_columns_match_placeholders`, `::test_insert_round_trip` |
+| CHG-07 | 3 | `db_safety.py`: `clamp_limit`, `parse_limit`, `validate_text`. LIMIT on every SELECT (SQL and ORM). | Unbounded reads are a resource-exhaustion vector, and the rubric requires a ceiling. Centralizing the clamp gives one tested definition of "max". Aggregates get an output LIMIT, not an evaluation LIMIT, so analysis answers are unchanged. | `test_db_safety.py::test_clamp_boundaries`, `::test_parse_limit_rejects`, `::test_validate_text_rejects_nul`; `test_sql_guard.py::test_every_select_has_limit` |
+| CHG-08 | 4 | New `GET /api/applicants`: whitelisted sort, enum order, parameterized filters, clamped limit, strict param set | No user input reached SQL, so the defenses had nothing to defend. A read-only JSON endpoint is the smallest surface that exercises every rubric control and is fully testable. | `test_applicant_search.py::*`, `test_sqli_malicious.py::*` |
+| CHG-09 | 4 | `create_app(services: Services, *, database_url, testing)`. The `Services` dataclass replaces five keyword arguments and adds `search`. | Adding a sixth injected dependency would make `create_app` an unbounded argument list (R0913). One typed seam keeps the Module 4 injection pattern and gives the defaults one home. | `test_flask_page.py::test_services_default_to_real_implementations`, `::test_services_override_is_used` |
+| CHG-10 | 6 | Pull route: named exception tuple, busy flag cleared in `finally`, JSON 500 handler | Narrowing the broad `except` alone would let an unlisted error leave `busy=True` forever, turning one failure into a permanent 409. `finally` makes the state correct regardless. | `test_buttons.py::test_unlisted_exception_clears_busy`, `::test_unhandled_error_returns_json_500` |
+| CHG-11 | 5 | DDL removed from the runtime pull path. Schema setup is owner-only via `load_data.py`. | The least-privilege app role cannot CREATE or COMMENT, so runtime DDL would break Pull Data. Schema changes are a deployment act, not a request-time act. | `test_pull_pipeline.py::test_load_records_issues_no_ddl`; `test_least_privilege.py::test_pull_succeeds_as_app_role` |
+| CHG-12 | 5 | Two roles, `roles.sql`, `grants.sql`, `migrate_ownership.sql` | Module 4 ran as a superuser, so any injection would have had full control. The app role gets SELECT and INSERT on one table, which caps blast radius to reading and adding public applicant rows. | `test_least_privilege.py::test_role_attributes`, `::test_table_privileges`, `::test_ddl_denied[*]` |
+| CHG-13 | 5 | Test harness split: `TEST_DATABASE_URL` (app) and `TEST_ADMIN_DATABASE_URL` (owner) | Tests that run as a superuser prove nothing about least privilege. Fixtures need TRUNCATE, which the app must not have. | `test_least_privilege.py::test_app_fixture_connects_as_app_role` |
+| CHG-14 | 6 | scrape helpers used by `pull_data` promoted to public names | They were already a cross-module API. The underscore was a false signal and the cause of W0212. | Existing `test_scrape.py` and `test_pull_pipeline.py` tests (renamed), `test_scrape.py::test_public_api_surface` |
+| CHG-15 | 6 | `scrape_data(window: ScrapeWindow, options: ScrapeOptions)`; page loop extracted | Nine positional arguments are an error-prone call surface (R0913/R0914). Dataclasses name every knob and keep defaults in one place. | `test_scrape.py::test_options_defaults`, existing scrape tests updated |
+| CHG-16 | 6 | SQLAlchemy functions imported from `sqlalchemy.sql.functions`. Quoted `sessionmaker[Session]` annotations. | Clears 21 astroid false positives without disables. There is no behavior change, and compiled SQL is identical. | `test_orm_queries.py::test_compiled_sql_unchanged` (snapshot from Phase 0) |
+| CHG-17 | 6 | `.pylintrc` (minimal), `.editorconfig`, line-length and newline fixes | Configuration states where the code lives, not what rules to relax. Formatting is enforced by the editor rather than remembered. | `test_lint_policy.py::test_pylintrc_relaxes_nothing`, `::test_no_inline_disables` |
+| CHG-18 | 0 | `pytest.ini`: `security` marker, `--strict-markers`, collection hook rejecting unmarked tests. CI runs the full suite. | Module 4 selected tests by marker expression, so a test carrying only a new marker would silently never run. Running everything and rejecting unmarked tests closes that gap. | `test_lint_policy.py::test_every_collected_test_is_marked` |
+| CHG-19 | 9 | `.github/workflows/ci.yml`, four jobs; `tests.yml` untouched | Shift-left: lint, dependency graph, supply chain, and tests each fail independently and visibly. Module 4's workflow keeps that module's grade evidence intact. | Green CI run (`actions_success.png`); `test_ci_config.py::test_four_jobs`, `::test_pylint_fail_under_10`, `::test_svg_validation_step` |
+| CHG-20 | 11 | RTD repointed to `module_5`; Module 4 preserved via tag `module-4-final` | Docs should describe current code. The tag keeps the Module 4 docs reachable while that grade is pending. | RTD build log, both versions load |
 
-Adding `fake_query` is what makes `buttons` tests database-free too, not
-only `web` and `analysis` as originally scoped: `POST /update-analysis` calls
-`query()` even when not busy, so without a fake it would reach PostgreSQL.
-Measured: the 13 `web`/`buttons`/`analysis` tests run in 0.04s with no
-`DATABASE_URL` set at all, confirming they touch no database.
+`test_ci_config.py` parses `ci.yml` with PyYAML, which becomes a dev extra. It is not a substitute for
+the green run, but it catches a deleted gate before CI ever runs.
 
-`app` still passes `testing=True`, selecting the inline pull runner so a
-`POST /pull-data` has finished by the time the request returns.
+---
 
-`clean_db` builds the schema with `load_data.create_table` (not
-`Base.metadata.create_all`), so column comments and the `ON CONFLICT (p_id)`
-target are the production ones. If PostgreSQL is unreachable, it calls
-`pytest.fail()` with a message naming what to do, rather than skipping: a
-silent skip would quietly reduce coverage while looking like a neutral
-result.
+## 5. Requirements matrix
 
-### A query function the suite needed and the app did not have
+| ID | Requirement (PDF wording, condensed) | Pts | Phase | Verification |
+|---|---|---|---|---|
+| R1 | `module_4/` copied to `module_5/` | | P0 | Tree check |
+| R2 | venv in `module_5/`; deps install; app, analysis page, tests run | 3 | P0, P1 | `fresh_install_check.sh`, CI |
+| R3 | Pylint 10.00/10 on **only** `module_5/src` | 7 | P6 | `pylint_report.txt`, CI lint |
+| R4 | No Pylint errors or warnings | 2 | P6 | Zero message lines |
+| R5 | README documents the Pylint command | 1 | P10 | README |
+| R6 | No SQL via f-strings, `+`, `.format()`, `%` | 5 | P3 | `test_no_sql_string_building` |
+| R7 | psycopg composition (`SQL`, `Identifier`, `Placeholder`/`%s`) | 5 | P3, P4 | Builder tests |
+| R8 | User values always parameterized | 4 | P3, P4 | Spy cursor, malicious matrix |
+| R9 | Construction separated from execution | 3 | P3 | Builders return `(stmt, params)`, one executor |
+| R10 | Malicious input: no crash, no leak, no "everything returned" | 3 | P4 | Section 7.4 matrix |
+| R11 | Every query has LIMIT | 2 | P3 | `test_every_select_has_limit` |
+| R12 | Max limit enforced (1 to 100) | 2 | P3, P4 | Clamp tests, API tests |
+| R13 | Oversized-request abuse prevented | 1 | P4 | 400 or clamp, never 500 |
+| R14 | Creds from env, none hard-coded | 3 | P2 | `test_config.py`, G6 |
+| R15 | `.env.example`; `.env` gitignored | 2 | P2 | G6, file check |
+| R16 | Least-privilege, non-superuser | 3 | P5 | `test_least_privilege.py` in CI |
+| R17 | PDF: permissions, why, SQL or screenshot | 2 | P10 | Report |
+| R18 | `dependency.svg` via pydeps plus Graphviz | 4 | P7 | File, CI |
+| R19 | Graph reflects project structure | 2 | P7 | Review |
+| R20 | PDF: 5 to 7 sentence explanation | 2 | P10 | Report |
+| R21 | Functional `setup.py`; installable | 3 | P1 | Fresh install, both paths |
+| R22 | PDF: why packaging matters | 2 | P10 | Report |
+| R23 | `requirements.txt` has runtime and tooling (pylint, pydeps) | 2 | P1 | `test_lock_includes_tooling` |
+| R24 | README "Fresh Install", pip **and** uv | 3 | P10 | README, CI |
+| R25 | `snyk test` executed | 2 | P8 | Output |
+| R26 | `snyk-analysis.png` | 2 | P8 | File |
+| R27 | Vulns documented and addressed | 2 | P8, P10 | Report table |
+| R28 | `ci.yml` present and functional | 2 | P9 | Green run |
+| R29 | CI Pylint `--fail-under=10` | 3 | P9 | Workflow |
+| R30 | CI generates and validates `dependency.svg` | 3 | P9 | Workflow |
+| R31 | CI runs Snyk | 2 | P9 | Workflow |
+| R32 | CI runs pytest, fails on failures | 3 | P9 | Workflow |
+| R33 | README: setup, env vars, running, security tooling | 3 | P10 | README |
+| R34 | PDF: pip/uv, graph, SQLi, least privilege, LIMIT, CI | 5 | P10 | Report checklist |
+| R35 | Deliverables complete and organized | 2 | P11 | Checklist |
+| R36 | Correct repo via SSH; `module_5/` organized; Canvas matches GitHub | 5 | P11 | Checklist |
+| R37 | Actions success screenshot | | P9 | `actions_success.png` |
+| R38 | `coverage_summary.txt` | | P10 | File |
+| R39 | Every M4→M5 design change documented, rationalized, tested (Josh's requirement) | | all | G7 |
+| XC1 | `snyk code test` executed | +2 | P8 | Output |
+| XC2 | Screenshot or output | +2 | P8 | `snyk-code-analysis.png` |
+| XC3 | Findings summary and remediation | +1 | P10 | Report |
 
-The assignment's database-writes section asks for "a simple query function"
-returning "a dict with our expected keys (the required data fields within
-M3)" — distinct from `orm_queries.all_results()`, which returns the nested
-per-question shape the analysis page consumes. No such function existed.
-Added to `orm_queries.py`:
+---
 
-- `REQUIRED_FIELDS`: the 15 Module 3 schema columns, in schema order.
-  Excludes `program_name`, `university`, `decision_date` (the
-  README's "Additional columns").
-- `applicant_dict(applicant)`: one `Applicant` row as a dict of those fields.
-- `fetch_one(session)`: the newest-by-`p_id` row, same shape, or `None`.
-
-### Test data
-
-`fake_rows` (two records, Module 2 JSON key format) is deliberately the
-shape the real scraper returns after standardization, so the same fixture
-exercises `create_app()`'s default loader path end to end in `db_client`
-tests, not just the fake path.
-
-### A bug this phase's smoke-testing surfaced, not fixed here
-
-Constructing a `DATABASE_URL` by hand with an unescaped `@` in the password
-fails to connect (psycopg reads past the `@` as the host separator). This is
-expected `urllib.parse` behavior, not a code defect: `models.build_url()`
-already percent-decodes a URL that was percent-*encoded* going in. Noted
-here because it cost real debugging time once; a password containing `@`,
-`/`, or `:` must be percent-encoded by whoever writes the `.env` or exports
-`DATABASE_URL`.
-
-## Phase 2: coverage to 100 (COMPLETE)
+## 6. Target layout
 
 ```
-TOTAL  802  0  100%
-Required test coverage of 100% reached. Total coverage: 100.00%
-102 passed in 0.79s
+.github/workflows/
+    tests.yml                 # module_4, untouched
+    ci.yml                    # NEW: module_5, four jobs
+module_5/
+    src/
+        app.py                # + GET /api/applicants, Services dataclass
+        db_safety.py          # NEW
+        applicant_search.py   # NEW
+        query_data.py, load_data.py, orm_queries.py, models.py, pull_data.py, scrape.py, clean.py
+        templates/, static/
+    tests/
+        conftest.py           # app vs admin connections; marker hook; no sys.path hack
+        test_db_safety.py, test_applicant_search.py, test_sqli_malicious.py,
+        test_sql_guard.py, test_least_privilege.py, test_config.py,
+        test_packaging.py, test_lint_policy.py, test_ci_config.py      # NEW
+        ...module_4 tests, updated
+    sql/roles.sql, grants.sql, migrate_ownership.sql                    # NEW
+    scripts/gate.sh, check_change_register.py, check_secrets.py,
+            fresh_install_check.sh, regen_lock.sh                       # NEW
+    .gate/                    # gitignored: per-phase pylint scores and logs
+    report/                   # NEW: report source (Phase 10)
+    docs/                     # Sphinx, carried over
+    data/
+    setup.py, requirements.txt, .pylintrc, .editorconfig, .env.example, .gitignore, pytest.ini
+    CHANGES.md                # NEW: Change Register
+    dependency.svg, snyk-analysis.png, snyk-code-analysis.png, privileges.png, actions_success.png
+    pylint_report.txt, coverage_summary.txt, module_5_report.pdf
+    README.md, PLAN.md
 ```
 
-Committed to `module_4/coverage_summary.txt`, produced by
-`pytest -m "web or buttons or analysis or db or integration"` exactly as the
-README documents running it.
+---
 
-Worked `term-missing` top down, file by file, after `test_pull_pipeline.py`
-(below) closed the scraper gap: `query_data.py` (51% -> 100%), `scrape.py`
-(39% -> 100%), `load_data.py` (74% -> 100%), `models.py` (70% -> 100%),
-`orm_queries.py` (86% -> 100%), `clean.py` (83% -> 100%), `pull_data.py`
-(87% -> 100%), `app.py` (91% -> 100%). Four new test files:
-`test_scrape.py`, `test_query_data.py`, `test_load_data.py`,
-`test_orm_queries.py`, `test_models.py`; the rest extended existing files.
+## 7. Phases
 
-### check_llm.py, run_llm.sh, llm_hosting/
+### Phase 0: Scaffold, baseline, and gate tooling
 
-Deliberately outside `src/`, so they do not count toward `--cov=src`. Left
-there.
+**Entry:** E2 on the repo root. `module_4` suite green with Module 4's own instructions. Python 3.14.6 available.
 
-### query_data.py: a real, unused code path, tested for real
+**Tasks**
+1. `cp -R module_4 module_5`, excluding `.venv`, `pull_work/`, `__pycache__`, `.coverage`. Replace
+   `assignment/` contents with the M5 PDF.
+2. Repo-root `CLAUDE.md`: active module is `module_5`, `module_4` is frozen, and point to this plan,
+   the gate script, and the Change Register rule.
+3. Create the venv on 3.14.6 and install from Module 4's `requirements.txt`.
+4. Capture snapshots for the parity tests **before any change**:
+   - `query_data.run_all()` output on the seeded fixture DB → `tests/snapshots/m4_run_all.txt`
+   - Compiled SQL of every ORM statement → `tests/snapshots/m4_orm_sql.txt`
+5. Create `scripts/gate.sh`, `check_change_register.py`, `check_secrets.py`, `CHANGES.md` (all rows
+   `planned`), `.gate/` (gitignored), `.editorconfig`, and a minimal `.pylintrc` (`source-roots=src` only for now).
+6. CHG-18: `pytest.ini` gains `security` and `--strict-markers`, plus the conftest collection hook
+   that fails unmarked tests.
+7. Replace "Module 4" with "Module 5" in each `src/` header docstring.
+8. Record the baseline Pylint score (8.36 expected) in `.gate/scores`.
 
-`app.py` reads results through `orm_queries.py` (the ORM path); nothing calls
-`query_data.py`'s raw-SQL `q1()` through `uq2()`, `run_all()`, `main()`. A
-fake cursor would have closed the coverage gap cheaper, but would only prove
-Python unpacks a canned tuple, not that the SQL text is still valid Postgres.
-`test_query_data.py` runs every question against the real test database
-instead, which is a stronger test for the same cost and fits the `db` marker
-exactly ("database schema/inserts/selects").
+**Exit:** standard gate (G3 baseline is the recorded score) plus:
+- 102 Module 4 tests pass, plus the new policy tests. Coverage 100%.
+- Snapshots committed. `/analysis` renders against the local DB.
+- Running `gate.sh 0` with a deliberately unmarked dummy test fails (then delete the dummy). This proves G2 bites.
 
-### scrape.py: the same reasoning as pull_data.py, one layer down
+### Phase 1: Packaging and reproducible environment (CHG-01, CHG-02)
 
-`scrape_data()`, the Module 2 one-time historical-pull function flagged as a
-coverage gap when Phase 2 began, calls `_start_browser()` directly with no
-injection point, the same problem `pull_data.py` had before Phase 0/1.
-Fixed the same way: added `browser_factory`, `fetch_html`, and `sleep`
-parameters, defaulting to the real implementations, letting
-`test_scrape.py` drive the real stop-on-no-page / stop-on-no-entries /
-stop-at-max-entries / resume-a-previous-run logic with fakes.
-`_fetch_html()`'s `TimeoutException` branch is the one place left genuinely
-untestable without either a real browser timeout or standing in for
-`WebDriverWait`'s own internal sleep; pragma'd, with the reason inline next
-to it and a pointer to this note. `_start_browser()` itself is tested by
-replacing `webdriver.Chrome` with a fake that records the `Options` it was
-given (Selenium's `Options.arguments` is a public list), proving the
-persistent-profile and headless configuration without launching Chrome.
+**Entry:** standard. `uv --version` works.
 
-### load_data.py, models.py, orm_queries.py: error paths and unreached CLIs
+**Tasks**
+1. `setup.py`:
+   ```python
+   setup(
+       name="gradcafe-analytics",
+       version="5.0.0",
+       description="Grad Cafe admissions analytics: scraper, PostgreSQL loader, Flask analysis page.",
+       author="Joshua Latz",
+       python_requires=">=3.14",
+       package_dir={"": "src"},
+       py_modules=["app", "applicant_search", "clean", "db_safety", "load_data",
+                   "models", "orm_queries", "pull_data", "query_data", "scrape"],
+       install_requires=[  # runtime only, compatible-release ranges, commented per package
+           "Flask~=3.1", "psycopg[binary]~=3.3", "SQLAlchemy~=2.0", "python-dotenv~=1.0",
+           "beautifulsoup4~=4.15", "selenium~=4.49", "urllib3~=2.7",
+       ],
+       extras_require={"dev": [
+           "pylint~=4.1", "pydeps~=3.0", "pytest~=8.4", "pytest-cov~=7.0", "pytest-mock~=3.15",
+           "PyYAML~=6.0", "sphinx~=8.2", "sphinx-rtd-theme~=3.0",
+       ]},
+   )
+   ```
+   `db_safety` and `applicant_search` are listed now. Phase 1 creates them as docstring-only stubs so
+   the editable install resolves, and Phases 3 and 4 fill them in.
+2. `scripts/regen_lock.sh`: `uv pip compile setup.py --extra dev -p 3.14 -o requirements.txt`.
+   No hashes, because `pip install -r` with hashes rejects the editable line a grader will run next.
+3. Delete the `sys.path` insertion in `tests/conftest.py`.
+4. `scripts/fresh_install_check.sh` clones `HEAD` into a temp dir and, for each installer:
+   - pip: `python3.14 -m venv .venv && pip install -r requirements.txt && pip install -e . --no-deps`
+   - uv: `uv venv -p 3.14 && uv pip sync requirements.txt && uv pip install -e . --no-deps`
 
-Most of each module ran already, indirectly, through `insert_records()` and
-ORM calls elsewhere in the suite. What was missing were specific branches
-nothing else reaches: the `PG*` fallback when `DATABASE_URL` is unset, a
-connection refused (port `1`, instant and reliable), a failed statement
-(`SELECT` against a table that does not exist), blank-to-`None` conversion
-for every field type, `_resume()`'s zero-rows and prior-run-found cases, and
-each module's own `main()`. `models.py`'s `_verify_mapping()` mismatch branch
-is tested by faking the SQLAlchemy inspector's `get_columns()` result rather
-than corrupting the real test schema to force a mismatch; the match branch
-runs for real, against the schema `load_data.create_table()` actually
-builds, so it is a genuine proof the ORM model is still in sync, not a
-coverage formality.
+   Then it runs the import smoke test, `pylint --version`, `pydeps --version`, and
+   `pytest -m "not db and not integration"`.
+5. Write `test_packaging.py`.
 
-### app.py: two branches, two helper functions
+**Exit:** standard gate plus: `fresh_install_check.sh` passes both legs. `grep -c "==" requirements.txt`
+equals the non-comment line count. CHG-01 and CHG-02 are `done` with README subsections.
 
-`run_in_background()` (the real, non-testing runner) and the lambda
-`make_scraper()` returns are never reached, because every test app passes
-`testing=True` and an explicit `scraper`. Tested directly: `run_in_background`
-with a `threading.Event` the job sets (a synchronization primitive, not a
-fixed-duration `sleep()`, with a generous timeout only as a hang safety net);
-`make_scraper` with `app.scrape_new_records` monkeypatched to a recorder,
-proving the returned closure is bound to the right `session_factory` without
-attempting a real scrape. The two `SQLAlchemyError` branches
-(`/update-analysis` and `/analysis`, both 503) needed a `query` fake that
-raises, which nothing had exercised.
+### Phase 2: Configuration and secrets (CHG-03, CHG-04)
 
-### Pragma count: 9, all named, both sanctioned categories
+**Entry:** standard. A local `.env` exists, built from `.env.example`. Josh's real values never get committed.
 
-Eight `__main__` blocks, one per `src/` module that has one. One real-Selenium-
-timeout branch in `scrape._fetch_html()`. Under the limit of ten; none widen
-an existing pragma to cover more than its one line or block.
+**Tasks**
+1. `get_db_config(database_url=None, role="app")`. Precedence:
+   1. The explicit `database_url` argument.
+   2. The `DATABASE_URL` env var.
+   3. `DB_HOST`, `DB_PORT`, `DB_NAME`, plus `DB_USER`/`DB_PASSWORD` for role `app` or
+      `DB_OWNER_USER`/`DB_OWNER_PASSWORD` for role `owner`.
 
-### Closed: the scraper orchestration had zero coverage
+   A missing variable raises `KeyError` naming the variable, never its value.
+2. `models.build_url()` follows the same contract.
+3. `.env.example`:
+   ```
+   # Runtime (least-privilege) account the web app and Pull Data use.
+   DB_HOST=localhost
+   DB_PORT=5432
+   DB_NAME=gradcafe
+   DB_USER=gradcafe_app
+   DB_PASSWORD=change-me
+   # Owner account: schema setup and bulk load only. Keep it out of the running app's environment.
+   # DB_OWNER_USER=gradcafe_owner
+   # DB_OWNER_PASSWORD=change-me
+   # Optional single-URL override, used by CI and tests. Takes precedence over DB_*.
+   # DATABASE_URL=postgresql+psycopg://gradcafe_app:change-me@localhost:5432/gradcafe
+   ```
+4. Remove every `PG*` reference from code, docs, and CI env.
+5. Sanitize connection error output (CHG-04).
+6. Write `test_config.py`.
 
-Caught during Phase 1 review, not planned up front: `test_buttons.py` fakes
-the whole `scraper` callable at the `create_app()` boundary, exactly as the
-assignment asks ("should be faked / mocked"). That is correct for testing the
-route's contract, but it meant `pull_data.scrape_new_records()`,
-`_scrape_new_pages()`, `_standardize()`, and every function in `clean.py` ran
-under zero tests: not a style gap, a behavioral one. Nothing proved the real
-stop-at-the-database's-newest-id logic, the record filtering, or the LLM
-subprocess output handling actually worked.
+**Exit:** standard gate plus: `grep -rn "PG\(HOST\|USER\|PASSWORD\|DATABASE\|PORT\)" src tests`
+is empty. App starts from `.env`. `git check-ignore -q .env` succeeds.
 
-Closed with a new file, `tests/test_pull_pipeline.py`, marked `buttons`
-(the marker's canonical text, from the assignment's own required
-`pytest.ini` block, is `"Pull Data" and "Update Analysis" behavior`, not
-"button endpoints" - testing what Pull Data's pipeline actually does fits
-that text, even invoked one level below the Flask route). It calls
-`scrape_new_records()` for real, with a fake browser and a fake LLM process,
-proving the real orchestration logic. Required two more injection seams,
-added following the exact pattern already in place:
+### Phase 3: SQL composition and LIMIT everywhere (CHG-05, CHG-06, CHG-07)
 
-- `_scrape_new_pages()` / `scrape_new_records()` gained `fetch_html`.
-  `scrape._fetch_html()` drives a real Selenium `WebDriverWait`; a test
-  exercising the "page never arrived" branch through it would block for the
-  real 30-second timeout. `fetch_html` is injected separately from
-  `browser_factory` so a fake can answer instantly while the driver
-  argument's contract stays untouched.
-- `scrape_new_records()` now threads its `sleep` argument through to
-  `_scrape_new_pages()`, which it previously dropped silently. A genuine
-  two-page pagination test (following a "Next" link) would otherwise hit a
-  real `PAGE_DELAY` (2 seconds) between pages - caught only because the test
-  that needed two pages ran slow until this was fixed.
+**Entry:** standard. Parity snapshots from Phase 0 are present.
 
-Measured result: `pull_data.py` 37% -> 87%, `scrape.py` 27% -> 39%,
-`clean.py` 23% -> 83%. All 11 new tests run in 0.02s with no database.
-`scrape.py`'s remaining gap is almost entirely `scrape_data()`, `_resume()`,
-and `save_data()`: the Module 2 one-time historical-pull functions, which the
-Module 3/4 Pull Data button never calls (it uses `_start_browser`,
-`_build_url`, `_next_cursor`, and `_page_path` directly). These still count
-toward `--cov=src`'s 100% and are not yet covered or pragma'd; next to
-address.
+**Rules (enforced by tests)**
+1. Every statement given to psycopg `execute`/`executemany` is a `sql.Composable`. A bare `str` fails.
+2. Builders return `(stmt, params)` and touch no DB. One executor per module calls `cursor.execute(stmt, params)`.
+3. Identifiers go through `sql.Identifier`. Values go through placeholders in `params`, **including
+   constants** (GPA/GRE ranges, regex patterns).
+4. Every SELECT ends in `LIMIT %(limit)s`, with `limit` from `clamp_limit()`. INSERT and DDL take none.
+5. No concatenation, f-string, `.format()`, or `%` formatting near SQL text.
 
-## Phase 3: CI
+**`db_safety.py`**
+```python
+MIN_LIMIT, MAX_LIMIT, DEFAULT_LIMIT = 1, 100, 20
 
-`.github/workflows/tests.yml` is scaffolded with a Postgres 16 service and
-`working-directory: module_4`. Push, confirm a green run, screenshot it to
-`module_4/actions_success.png`.
+def clamp_limit(value: int | None, default: int = DEFAULT_LIMIT) -> int: ...
+    # None -> default; below MIN -> MIN; above MAX -> MAX. Pure.
 
-## Phase 4: docs (COMPLETE)
+def parse_limit(raw: str | None) -> tuple[int, bool]: ...
+    # Strict: optional sign plus at most 6 digits, else LimitError (-> 400).
+    # Returns (effective_limit, was_clamped). Rejects "1e3", "10 OR 1=1", " 5", 5000-digit strings.
 
-Content done: `orm_queries.py`'s twelve runner functions (`q1` through
-`uq2`, `dataset_summary`, `all_results`) all have docstrings now, mirroring
-`query_data.py`'s wording exactly for the ten that answer the same
-questions, since the two are meant to be read as parallel answers to the
-same analysis. `overview.rst`, `architecture.rst`, `testing.rst`, and
-`operations.rst` are filled in; `index.rst` and `api.rst` needed no changes.
+def validate_text(raw: str | None, field: str, max_len: int) -> str | None: ...
+    # Rejects over-length values and control characters including NUL. psycopg raises DataError on
+    # NUL in text, which would otherwise surface as a 500.
+```
 
-`architecture.rst` carries the JSON-versus-redirect decision and the
-injection-seam table; `operations.rst` carries the busy-state and
-uniqueness policy, including why Update Analysis is gated now when Module 3
-deliberately allowed it, matching the README's carried-over-changes section.
-`testing.rst` carries the marker table (rewritten as a `list-table`: the
-scaffolded simple table was malformed RST, with cell text such as
-`` ``integration`` `` wider than the column the `====` header declared),
-the fixture/test-double reference, and the same "why the suite grew past
-five files" story as the README.
+**LIMIT on aggregates (README and PDF).** On `SELECT COUNT(*) ...`, `LIMIT 1` caps rows *returned*,
+not rows *evaluated*. The slide's subquery-LIMIT pattern caps evaluation and would silently change
+every analysis answer once the table exceeds the limit. So aggregates get an output LIMIT, and the
+row-returning API gets the enforced 1 to 100 clamp.
 
-**Build verified clean**, exactly as documented (`sphinx-build -b html docs
-docs/_build/html`, no `-n`, no `-W` needed): zero warnings, zero errors.
-Checked separately with `-n -W` (nitpicky): found 6 broken `:func:`/`:class:`
-cross-references, all in the new content, all because `conf.py` does not
-set `private-members` so autodoc never generates pages for underscore-
-prefixed functions; fixed by switching those six to plain code literals,
-since they are implementation details explained in prose, not part of the
-linkable public API. 8 nitpick-only warnings remain, all pre-existing
-(`api.rst`'s `automodule` directives surfacing SQLAlchemy's own type hints
-and `DeclarativeBase`-inherited docstrings, e.g. `MetaData`, `_RegistryType`),
-not introduced by anything in this phase, and harmless either way:
-`.readthedocs.yaml` already sets `fail_on_warning: false`, and they do not
-appear under the actual build command at all, only under `-n`.
+**`query_data.py`:**
+- `QUESTIONS` maps names to builders `build_q1` to `build_uq2`. `_execute()` is the module's only
+  `execute` call site.
+- Single-row aggregates use `clamp_limit(1)`. UQ1 and UQ2 use `clamp_limit(MAX_LIMIT)`.
+- The SQL quoted in the README and PDF is rendered from the builders with `as_string(None)`, so the
+  docs cannot drift from what runs.
 
-Published. The repo went public (checked first: `.env` has never been
-committed in this repo's history, and no password/secret-shaped string is
-committed anywhere, so going public exposed ordinary coursework, not
-credentials), Read the Docs connected via its GitHub App after the repo's
-OAuth App connection needed a resync to see it, and the first build went
-green on the first try at
-<https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/>
-(verified live, not just assumed from the build log). Linked from both
-places in `module_4/README.md`: the header line and the `## Documentation`
-section.
+**`load_data.py`:** `INSERT` built as
+`sql.SQL("INSERT INTO {t} ({cols}) VALUES ({vals}) ON CONFLICT ({pk}) DO NOTHING")`, with both column
+lists generated from one `COLUMNS` tuple. `CREATE TABLE` composed. `_count_rows` gets `LIMIT 1`.
 
-Section titles the source references by name, confirmed present in the
-README: **Additional columns** (`models.py`), **LLM standardizer setup**
-(`pull_data.py`), **Validity ranges** (`query_data.py`).
+**ORM:** `.limit(clamp_limit(1))` on single-row statements, `.limit(clamp_limit(MAX_LIMIT))` on
+grouped ones, including `pull_data` and `models._verify_mapping`.
 
-## Rubric traceability
+**Tests**
+- `test_sql_guard.py::test_no_sql_string_building` (static): AST walk of `src/*.py`. Fails on any
+  f-string, string `+` or `%`, or `.format()` whose literal text matches
+  `\b(SELECT|INSERT|UPDATE|DELETE|CREATE|ALTER|DROP|FROM|WHERE|LIMIT)\b`, and reports file:line.
+- `::test_every_execute_receives_composable` (runtime): a spy cursor records the argument types for
+  `run_all`, `insert_records`, and `search_applicants` (the last one added in Phase 4).
+- `::test_every_select_has_limit`: every `QUESTIONS` builder, every ORM `*_stmt()`, and the search builder.
+- `test_db_safety.py`: boundary tables for 0, 1, 100, 101, -1, `None`, `"abc"`, `"1e3"`, `"9"*5000`, and NUL.
+- `test_query_data.py::test_parity_with_module_4`: `run_all` output equals the Phase 0 snapshot.
+  **This is the proof the refactor changed no answers.**
 
-| Pts | Category | Where it is earned |
-|----|----|----|
-| 5  | Repo setup and submission | layout + public repo + Canvas match |
-| 8  | Structure and testability | phase 0: `create_app` seam, `PullState`, `data-testid`, `DATABASE_URL` |
-| 13 | Flask page and button behavior | `test_flask_page.py`, `test_buttons.py` |
-| 8  | Busy state, error path, determinism | `test_buttons.py` gating and failure tests |
-| 14 | Analysis formatting and database | `test_analysis_format.py`, `test_db_insert.py` |
-| 8  | Integration | `test_integration_end_to_end.py` |
-| 14 | Organization, markers, coverage | `pytest.ini`, `coverage_summary.txt` |
-| 8  | GitHub Actions CI | `tests.yml` + `actions_success.png` |
-| 17 | Sphinx documentation | `docs/` + published RTD link in README |
-| 5  | README, requirements, deliverables | final pass |
+**Exit:** standard gate plus: the AST guard reports zero findings, and the parity test passes. To
+prove the guard bites, temporarily reintroduce one f-string SQL statement, confirm the gate fails,
+then revert.
 
-## Known ambiguities, resolved
+### Phase 4: `GET /api/applicants` (CHG-08, CHG-09)
 
-- The prose says 100% coverage "across all modules" but the supplied
-  `pytest.ini` scopes `--cov=module_4/src`. Following the `pytest.ini`.
-- The supplied `pytest.ini` uses `--cov=module_4/src`, which only resolves
-  from the repo root, while `pytest.ini` itself sits in `module_4`. Using
-  `--cov=src` and running from `module_4`. Same scope, actually runnable.
+**Entry:** standard. `db_safety` complete.
+
+**7.4.1 Contract**
+
+| Param | Type | Rule | Bad input |
+|---|---|---|---|
+| `limit` | int | `parse_limit`. Default 20, clamp 1 to 100. Response reports the effective value. | Non-integer or over 6 chars → 400 |
+| `sort` | enum | Whitelist `{"p_id","date_added","gpa","gre","gre_v","gre_aw","term","status","degree"}` → `sql.Identifier` | → 400 |
+| `order` | enum | `{"asc": sql.SQL("ASC"), "desc": sql.SQL("DESC")}`. Default `desc`. | → 400 |
+| `term`, `status`, `degree`, `nationality` | text | `validate_text(max_len=64)`. `LOWER(col) = LOWER(%(x)s)`. | → 400 |
+| `q` | text | `validate_text(max_len=100)`. `program ILIKE %(q)s ESCAPE '\'` with `\ % _` escaped in the value. | → 400 |
+| other | | Rejected so the surface stays enumerable | 400 listing allowed params |
+
+The first value wins for repeated params. The projection is fixed and composed from `Identifier`s.
+ORDER BY uses `{sort} {order} NULLS LAST, p_id {order}`.
+
+```
+200 {"ok": true, "limit": 20, "requested_limit": "500", "clamped": true,
+     "sort": "date_added", "order": "desc", "count": 20, "rows": [...]}
+400 {"ok": false, "error": "<param and problem; never echoes the raw value>"}
+503 {"ok": false, "error": DB_UNREACHABLE}
+```
+
+**7.4.2 Implementation:** `parse_search_args(args) -> SearchFilters` (a frozen dataclass; validation),
+`build_search(filters) -> (Composed, params)` (pure composition), and
+`search_applicants(cursor, filters)` (the executor). The search is injected through `Services.search`
+(CHG-09).
+
+**7.4.3 Offline tests (`test_applicant_search.py`, markers `web`, `security`):**
+- Builder snapshot for a representative filter set.
+- A hostile identifier forced past the whitelist renders quoted.
+- Every 400 path, using a fake `search` that fails the test if it is called. This proves validation
+  rejects input before any query exists.
+
+**7.4.4 Malicious matrix (`test_sqli_malicious.py`, markers `db`, `security`):** seeded with N known
+rows and connected as the app role from Phase 5 on (as the Phase 4 test URL until then). Every case
+also asserts: status is not 500, `applicants` still has N rows, and the response holds only
+projection columns.
+
+| Input | Expect |
+|---|---|
+| `term=' OR '1'='1` | 200, 0 rows (not N) |
+| `term=Fall 2026'; DROP TABLE applicants; --` | 200, 0 rows, table intact |
+| `status=accepted' UNION SELECT usename, passwd FROM pg_shadow --` | 200, 0 rows, no `passwd` key |
+| `q=%`, `q=_` | Only rows literally containing `%` or `_` (seed one of each) |
+| `q=\` | 200, no SQL error |
+| `sort=gpa; DROP TABLE applicants`, `sort=p_id"` | 400 |
+| `order=desc; SELECT pg_sleep(5)` | 400, fast |
+| `limit=1000000` | 200, `limit == 100`, `count <= 100`, `clamped` true |
+| `limit=0`, `limit=-5` | 200, `limit == 1` |
+| `limit=abc`, `1e3`, `10 OR 1=1`, `"9"*5000` | 400 |
+| `term=%00` | 400, not a `DataError` 500 |
+| `term="A"*10000` | 400 |
+| Unicode, RTL text, emoji | 200, literal |
+| `nationality=american&nationality=' OR 1=1 --` | First value wins, 200 |
+| `debug=1` | 400 |
+
+**Exit:** standard gate plus: every row of the matrix is a parametrized test case (count them).
+Two cases are spot-checked with `curl` against the running app.
+
+### Phase 5: Least-privilege database (CHG-11, CHG-12, CHG-13)
+
+**Entry:** standard. Local superuser access confirmed (track B). `psql --version` works.
+
+**`sql/roles.sql`** (run as superuser: `psql -v owner_pw=... -v app_pw=... -v db=gradcafe -f sql/roles.sql`)
+```sql
+CREATE ROLE gradcafe_owner LOGIN PASSWORD :'owner_pw'
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS;
+CREATE ROLE gradcafe_app LOGIN PASSWORD :'app_pw'
+    NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS CONNECTION LIMIT 20;
+REVOKE ALL ON DATABASE :"db" FROM PUBLIC;
+GRANT CONNECT ON DATABASE :"db" TO gradcafe_owner, gradcafe_app;
+REVOKE CREATE ON SCHEMA public FROM PUBLIC;     -- default since PG15, explicit for older servers
+GRANT USAGE, CREATE ON SCHEMA public TO gradcafe_owner;
+GRANT USAGE ON SCHEMA public TO gradcafe_app;
+```
+**`sql/grants.sql`** (after the owner creates the table)
+```sql
+REVOKE ALL ON applicants FROM PUBLIC;
+GRANT SELECT, INSERT ON applicants TO gradcafe_app;
+-- SELECT: page, API, and the pull's newest-entry read.
+-- INSERT: Pull Data. ON CONFLICT DO NOTHING requires no UPDATE.
+```
+No UPDATE, DELETE, TRUNCATE, REFERENCES, or TRIGGER. No sequence grants (`p_id` is not serial).
+No `ALTER DEFAULT PRIVILEGES`.
+
+**`sql/migrate_ownership.sql`:** `ALTER TABLE applicants OWNER TO gradcafe_owner;` then `grants.sql`,
+for Josh's existing local DB.
+
+**Code:** remove `create_table()` from `pull_data.load_records()`. `load_data.main()` uses
+`get_db_config(role="owner")`. Pull Data maps `InsufficientPrivilege` to a clear message.
+
+**Tests (`test_least_privilege.py`, markers `db`, `security`), as `gradcafe_app`:**
+- `test_role_attributes`: `rolsuper`, `rolcreaterole`, `rolcreatedb`, `rolbypassrls` all false.
+- `test_table_privileges`: SELECT and INSERT true. UPDATE, DELETE, TRUNCATE false.
+- `test_ddl_denied`, parametrized: DROP, ALTER, CREATE TABLE, TRUNCATE, COMMENT ON. Each raises
+  `psycopg.errors.InsufficientPrivilege`.
+- `test_pull_succeeds_as_app_role`: proves the minimum is also sufficient.
+- `test_app_fixture_connects_as_app_role`: guards against the harness quietly running as a superuser.
+
+**Exit:** standard gate plus:
+- The app runs locally against `.env` with `DB_USER=gradcafe_app`, and Pull Data works with a faked
+  scraper.
+- `privileges.png` captured (`\du` and `\dp applicants`).
+- `rolsuper` is false for the account in `.env`.
+
+### Phase 6: Pylint 10.00/10 (CHG-10, CHG-14, CHG-15, CHG-16, CHG-17)
+
+**Entry:** standard. Phases 3 to 5 complete, so the SQL rewrite has already removed most line-length hits.
+
+**Tasks:** work the section 1 table.
+- **CHG-10 (stuck-busy trap):** `job()` clears busy in `finally`; catch
+  `PULL_FAILURES = (PullError, psycopg.Error, SQLAlchemyError, OSError, WebDriverException)`; register
+  `@app.errorhandler(500)` returning the JSON error shape.
+- **CHG-15:** `scrape_data(window: ScrapeWindow, options: ScrapeOptions | None = None)`. Extract `_scrape_pages()`.
+- **CHG-16:** verify the compiled ORM SQL equals the Phase 0 snapshot.
+- **Final `.pylintrc`:**
+  ```ini
+  [MAIN]
+  source-roots=src
+  [DESIGN]
+  exclude-too-few-public-methods=sqlalchemy.orm.*
+  ```
+- Run `pylint --rcfile=.pylintrc --fail-under=10 src > pylint_report.txt` from `module_5/`.
+
+**Exit:** standard gate (G3 is now exactly 10.00 with zero message lines) plus: `pylint_report.txt`
+committed. `test_compiled_sql_unchanged` passes. Behavior parity holds (the run_all snapshot still passes).
+
+### Phase 7: Dependency graph
+
+**Entry:** standard. `dot -V` works. Pylint at 10, so the module structure is final.
+
+**Tasks**
+1. From `module_5/`: `pydeps src/app.py --noshow -T svg -o dependency.svg`. The default
+   `--max-bacon=2` shows the first ring of third-party packages. Tune `--cluster` or `--max-bacon`
+   only if it is unreadable, and record the final flags.
+2. Draft the 5 to 7 sentences, covering:
+   - `app` as the hub.
+   - The psycopg path (`query_data`, `load_data`, `applicant_search`) and the ORM path (`models`, `orm_queries`).
+   - The ETL chain `pull_data → scrape → clean → load_data`.
+   - `db_safety` as the shared leaf.
+   - What each external package does.
+
+**Exit:** standard gate plus: the SVG shows every `src/` module and both new modules. The explanation
+draft is stored in `report/` for Phase 10.
+
+### Phase 8: Snyk (required plus extra credit)
+
+**Entry:** standard, plus track A done: `snyk whoami` succeeds, Snyk Code is enabled, and
+`gh secret list` shows `SNYK_TOKEN`.
+
+**Tasks**
+1. In the active venv with the lock installed (Snyk inspects the installed environment):
+   `snyk test --file=requirements.txt --package-manager=pip --command=python`.
+   Screenshot → `snyk-analysis.png`. Save `--json` output to `snyk_report.json`.
+2. For each finding: upgrade in `setup.py`, regenerate the lock, and re-run; or remove the package; or
+   document why it does not apply. Any upgrade re-runs the full gate, since dependency bumps can change behavior.
+3. `snyk code test` → `snyk-code-analysis.png` and `snyk_code_report.txt`. Triage each finding as
+   fixed (commit reference), false positive (reasoning), or accepted risk. Any code fix gets a CHG row
+   and a test.
+4. Informational, and cut-line eligible: scan `llm_hosting/requirements.txt` and document the result.
+
+**Exit:** standard gate plus: zero high or critical findings in `snyk test`, or each one justified in
+writing. Both screenshots committed. A triage table is drafted for the report.
+
+### Phase 9: GitHub Actions CI (CHG-19)
+
+**Entry:** standard. `SNYK_TOKEN` secret present. Local gate green at Phase 8.
+
+```yaml
+name: module-5-ci
+on:
+  push:          { paths: ["module_5/**", ".github/workflows/ci.yml"] }
+  pull_request:  { paths: ["module_5/**", ".github/workflows/ci.yml"] }
+  workflow_dispatch:
+defaults: { run: { working-directory: module_5 } }
+
+jobs:
+  lint:              # R29
+    - setup-python 3.14.6 (cache pip) → pip install -r requirements.txt → pip install -e . --no-deps
+    - pylint --rcfile=.pylintrc --fail-under=10 src
+
+  dependency-graph:  # R30
+    - apt-get install -y graphviz → install as above
+    - pydeps src/app.py --noshow -T svg -o dependency.svg
+    - test -s dependency.svg && grep -q "<svg" dependency.svg
+    - upload-artifact dependency.svg
+
+  snyk:              # R31, D3
+    - install as above
+    - uses: snyk/actions/setup@master
+    - snyk test --file=requirements.txt --package-manager=pip --severity-threshold=high
+    - snyk test --json > snyk_report.json || true → upload-artifact
+    - snyk code test || true → upload-artifact
+    - skip with a notice when SNYK_TOKEN is unavailable (fork PRs)
+
+  test:              # R32, R2
+    strategy.matrix.installer: [pip, uv]      # uv leg is cut-line eligible
+    services.postgres: postgres:16 (superuser used ONLY to bootstrap roles)
+    - create db; psql -f sql/roles.sql with -v passwords from workflow env
+    - owner creates table; psql -f sql/grants.sql
+    - env TEST_DATABASE_URL (gradcafe_app), TEST_ADMIN_DATABASE_URL (gradcafe_owner)
+    - pytest
+```
+
+Interpretations: "4 separate actions" means four jobs in one `ci.yml`. The PDF's "pytest fail if
+score is below 10" means fail on any test failure, with the 100% coverage gate on top.
+
+**Exit:** standard gate plus: `test_ci_config.py` passes. One push yields **all four jobs green**,
+captured in `actions_success.png`. To prove the lint job bites, push a throwaway branch with one lint
+violation and confirm it fails red, then delete the branch.
+
+### Phase 10: Documentation and report
+
+**Entry:** standard. All evidence files exist.
+
+**README.md (module_5).** Module 4's structure and depth, plus:
+1. Deliverables checklist at the top.
+2. **Changes from Module 4**: one subsection per CHG row, anchored `#chg-XX`, giving problem →
+   decision → trade-off, and linking to its tests.
+3. **Fresh Install**: pip and uv side by side, the editable install and why (D8), and lock regeneration.
+4. **Environment variables**: table of every `DB_*` variable, which role uses it, and where it is read.
+5. **Database setup**: superuser bootstrap → `roles.sql` → owner load → `grants.sql` → app. Plus `migrate_ownership.sql`.
+6. **Security tooling**: exact Pylint, pydeps, `snyk test` and `snyk code test` commands, and how to read each.
+7. **SQL safety model**: the five rules, LIMIT semantics, and the `/api/applicants` contract.
+8. **Testing**: the security tests, the malicious matrix, the gate script.
+9. **CI**: four jobs and what each enforces.
+10. **Known issues and limitations**: non-editable install, `llm_hosting` findings, Snyk free-tier caps.
+
+**Report (`module_5_report.pdf`):** built together in this phase. Required content, in rubric order:
+- pip/uv install
+- packaging rationale
+- dependency graph with 5 to 7 sentences
+- SQLi defenses, with before/after from `Q7` and the matrix results
+- LIMIT enforcement
+- least privilege (SQL, rationale, `privileges.png`)
+- Snyk findings and remediation
+- Snyk Code findings and triage (extra credit)
+- CI workflow (`actions_success.png`)
+- Change Register summary
+
+`coverage_summary.txt`: `pytest > coverage_summary.txt`.
+
+**Exit:** standard gate (G7 now also checks that every README anchor exists) plus: a report checklist
+covering every R17, R20, R22, R27, R34 and XC3 topic. Every README command was copy-pasted into a
+fresh shell and worked.
+
+### Phase 11: Verification, submission, RTD (CHG-20)
+
+**Entry:** standard. CI green on `HEAD`.
+
+**Tasks**
+1. **Independent review** (cut line: checklist only). A fresh Claude Code session that has not seen
+   the implementation gets only the PDF and the repo, and walks section 5 row by row.
+2. Run `fresh_install_check.sh` against the pushed commit.
+3. Zip `module_5/`, excluding `.venv`, `__pycache__`, `.coverage`, `pull_work/`, `.gate/` and `.env`.
+   Diff the zip listing against `git ls-files module_5`.
+4. Submit the Canvas zip and the SSH URL `git@github.com:5th-legionnaire/jhu_software_concepts.git`
+   **by 23:30**.
+5. **After submitting:**
+   - Tag `module-4-final` at `1ecf2c9` and activate it as an RTD version.
+   - Repoint `.readthedocs.yaml` to `module_5/docs/conf.py` and `module_5/requirements.txt`.
+   - Confirm both `latest` (M5) and `module-4-final` (M4) build and load.
+6. Keep the repo public until grading completes.
+
+**Exit:** the submission checklist is fully ticked, CI is green on the submitted commit, and both RTD
+versions load.
+
+---
+
+## 8. Definition of done
+
+- [ ] `pylint --rcfile=.pylintrc --fail-under=10 src` → 10.00/10, zero messages, zero disables
+- [ ] `pytest` → green, 100% coverage, every test marked
+- [ ] Guard, LIMIT, malicious-matrix, and least-privilege suites pass as `gradcafe_app`
+- [ ] Analysis answers identical to Module 4 (parity snapshot)
+- [ ] Every CHG row `done`, with a README rationale and passing tests (G7)
+- [ ] Both fresh-install paths pass from a clean clone
+- [ ] All evidence files committed
+- [ ] `ci.yml` green, four jobs
+- [ ] Canvas zip matches the GitHub commit
+- [ ] RTD serves Module 5 on `latest` and Module 4 on `module-4-final`
+
+---
+
+## 9. Rubric traceability
+
+| Rubric category | Pts | Requirement IDs |
+|---|---|---|
+| GitHub repository setup and submission | 5 | R36, R35 |
+| Virtual environment and reproducible setup | 8 | R2, R23, R24 |
+| Pylint compliance | 10 | R3, R4, R5 |
+| SQL injection defenses and query refactoring | 20 | R6, R7, R8, R9, R10 |
+| LIMIT enforcement and query safety controls | 5 | R11, R12, R13 |
+| Database hardening and least privilege | 10 | R14, R15, R16, R17 |
+| Dependency analysis and graph | 8 | R18, R19, R20 |
+| Packaging and setup.py | 5 | R21, R22 |
+| Snyk dependency security analysis | 6 | R25, R26, R27 |
+| GitHub Actions CI pipeline | 13 | R28, R29, R30, R31, R32 |
+| README, PDF documentation, final deliverables | 10 | R33, R34, R35 |
+| **Extra credit:** Snyk Code | +5 | XC1, XC2, XC3 |
+
+---
+
+## 10. Known ambiguities, resolved
+
+| Ambiguity | Resolution |
+|---|---|
+| "4 separate actions" | Four jobs in one `ci.yml` |
+| "Pytest ... fail if score is below 10" | Fail on any test failure; the coverage gate stays |
+| "Every query must have an inherent LIMIT" | Every SELECT. Aggregates get an output LIMIT. |
+| "Queries that use user input" when none exist | D2 adds the surface. All SQL is converted anyway. |
+| "If your app is read-only..." | It isn't. SELECT plus INSERT, and DDL moves to the owner. |
+| `DB_*` "for example" vs `DATABASE_URL` | `DB_*` primary, URL override (D5) |
+| Expected tree shows `flask_app.py` | Kept `app.py` (D9) |
+| "uv can extract requirements from setup.py" | Used literally (D7) |
+| psycopg2 in the study guide vs psycopg 3 in code | Same `sql` module API. Noted in the PDF. |
+
+---
+
+## 11. Gate Log
+
+Appended by `gate.sh` at each phase exit.
+
+| Phase | Completed (ET) | Commit | Tests | Coverage | Pylint | Notes |
+|---|---|---|---|---|---|---|
+| baseline | 2026-10-05 | 1ecf2c9 | 102 | 100% | 8.36 | module_4 HEAD |
