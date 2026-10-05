@@ -1,0 +1,80 @@
+# EN 605.256 Modern Software Concepts in Python
+# Module 4: Testing and Documentation
+# Joshua Latz (jlatz1)
+#
+# Python 3.14.6
+#
+# Install with (from module_4/):
+#     python3 -m venv .venv && source .venv/bin/activate
+#     pip install -r requirements.txt
+#
+# One environment covers the Flask application, the ETL and database code
+# carried over from Modules 2 and 3, the Pytest suite with coverage, and the
+# Sphinx documentation build. The LLM standardizer under llm_hosting/ has its
+# own requirements.txt and is installed separately; see "LLM standardizer
+# setup" in the README.
+
+# Web application
+
+# Serves the analysis page and the two JSON button routes (src/app.py).
+Flask==3.1.3
+
+# Database
+
+# PostgreSQL driver (psycopg 3) for load_data.py and query_data.py, and the
+# driver SQLAlchemy uses underneath (postgresql+psycopg). The PyPI package is
+# named "psycopg"; "psycopg2" is the previous major version. The [binary]
+# extra installs psycopg-binary, which bundles libpq, so no local PostgreSQL
+# headers or compiler are needed. Prebuilt wheels exist for CPython 3.14 on
+# Apple silicon and on the ubuntu-latest runner CI uses.
+psycopg[binary]==3.3.6
+
+# ORM for models.py and orm_queries.py, and for the Flask page's database
+# reads. The assignment specifies SQLAlchemy 2.x.
+SQLAlchemy==2.0.54
+
+# Loads DATABASE_URL and the PG* fallbacks from .env (gitignored) instead of
+# hardcoding them.
+python-dotenv==1.0.1
+
+# ETL, carried over from Module 2 for Pull Data
+
+# HTML parsing for the saved result pages (clean.py). Also used by the test
+# suite to make assertions against the rendered page rather than matching
+# substrings in raw HTML.
+beautifulsoup4==4.15.0
+
+# CSS selector engine used internally by BeautifulSoup. Listed explicitly so
+# the environment can be reconstructed exactly.
+soupsieve==2.9.2
+
+# Renders Grad Cafe pages in a real Chrome browser. A plain urllib request to
+# the survey page returns HTTP 403 because the site sits behind Cloudflare, so
+# Selenium is used as a page renderer only. Selenium Manager resolves
+# ChromeDriver automatically; no separate driver install is needed. No test
+# launches a browser: pull_data.py takes its driver as an injected argument.
+selenium==4.49.0
+
+# HTTP client. Pulled in by Selenium, pinned here because the assignment
+# specifies it. URL construction and inspection in scrape.py use the standard
+# library urllib.parse module, which needs no installation.
+urllib3==2.7.0
+
+# Testing
+
+# Test runner, marker and fixture framework.
+pytest==8.4.2
+
+# Coverage plugin. pytest.ini sets --cov-fail-under=100 against src/.
+pytest-cov==7.0.0
+
+# Thin wrapper over unittest.mock, for the injected scraper and loader doubles.
+pytest-mock==3.15.1
+
+# Documentation
+
+# Sphinx builds module_4/docs into HTML, published on Read the Docs.
+sphinx==8.2.3
+
+# Read the Docs theme.
+sphinx-rtd-theme==3.0.2
