@@ -41,7 +41,7 @@ verified against the repository as it stands rather than assumed.
 - [x] **All listed test files, under `module_4`** — the five the assignment
       names, plus five more `--cov-fail-under=100` made necessary; see
       [The five files beyond the required five](#the-five-files-beyond-the-required-five).
-- [ ] **Submitted to both Canvas and the public GitHub repository** — the
+- [x] **Submitted to both Canvas and the public GitHub repository** — the
       repository is public and this commit is pushed; the Canvas submission
       itself is outside this repository and is not something committing code
       can confirm.
