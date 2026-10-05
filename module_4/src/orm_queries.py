@@ -204,15 +204,18 @@ def uq2_stmt():
 # Return shapes match query_data.py's, so the two can be compared directly.
 
 def q1(session):
+    """Fall 2026 applicant count."""
     return {"count": session.scalar(q1_stmt())}
 
 
 def q2(session):
+    """Percentage international among entries with a nationality classification."""
     international, classified, pct = session.execute(q2_stmt()).one()
     return {"international": international, "classified": classified, "pct": pct}
 
 
 def q3(session):
+    """Average GPA and GRE scores, each over applicants providing that metric."""
     keys = ("avg_gpa", "avg_gre_q", "avg_gre_v", "avg_gre_aw",
             "n_gpa", "n_gre_q", "n_gre_v", "n_gre_aw",
             "x_gpa", "x_gre_q", "x_gre_v", "x_gre_aw")
@@ -220,40 +223,48 @@ def q3(session):
 
 
 def q4(session):
+    """Average GPA of American Fall 2026 applicants."""
     avg, n = session.execute(q4_stmt()).one()
     return {"avg_gpa": avg, "n": n}
 
 
 def q5(session):
+    """Fall 2025 acceptance percentage."""
     accepted, total, pct = session.execute(q5_stmt()).one()
     return {"accepted": accepted, "total": total, "pct": pct}
 
 
 def q6(session):
+    """Average GPA of accepted Fall 2026 applicants."""
     avg, n = session.execute(q6_stmt()).one()
     return {"avg_gpa": avg, "n": n}
 
 
 def q7(session):
+    """JHU Masters in Computer Science entries, original fields."""
     return {"count": session.scalar(q7_stmt())}
 
 
 def q8(session):
+    """Fall 2026 CS PhD acceptances at the four universities, original fields."""
     return {"count": session.scalar(q8_stmt())}
 
 
 def q9(session):
+    """Question 8 using the LLM fields, and the difference from Question 8."""
     original = q8(session)["count"]
     llm = session.scalar(q9_stmt())
     return {"original": original, "llm": llm, "difference": llm - original}
 
 
 def uq1(session):
+    """Fall 2026 acceptance rate, applicants reporting a GPA versus not."""
     return [{"group": g, "entries": n, "accepted": a, "pct": p}
             for g, n, a, p in session.execute(uq1_stmt())]
 
 
 def uq2(session):
+    """Fall 2026 acceptance rate by degree and nationality."""
     return [{"degree": d, "nationality": nat, "entries": n, "accepted": a, "pct": p}
             for d, nat, n, a, p in session.execute(uq2_stmt())]
 

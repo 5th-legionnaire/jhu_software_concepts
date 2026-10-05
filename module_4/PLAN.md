@@ -327,28 +327,52 @@ address.
 `working-directory: module_4`. Push, confirm a green run, screenshot it to
 `module_4/actions_success.png`.
 
-## Phase 4: docs
+## Phase 4: docs (content COMPLETE; publishing still open)
 
-`docs/` is scaffolded with `conf.py` and six pages, each carrying TODOs.
-Fill overview, architecture, testing, and operations. `api.rst` already
-autodocs all eight modules. Build locally, then make the repo public and
-connect Read the Docs. Link the published URL from `module_4/README.md`.
+Content done: `orm_queries.py`'s twelve runner functions (`q1` through
+`uq2`, `dataset_summary`, `all_results`) all have docstrings now, mirroring
+`query_data.py`'s wording exactly for the ten that answer the same
+questions, since the two are meant to be read as parallel answers to the
+same analysis. `overview.rst`, `architecture.rst`, `testing.rst`, and
+`operations.rst` are filled in; `index.rst` and `api.rst` needed no changes.
 
-Two things to handle while there:
+`architecture.rst` carries the JSON-versus-redirect decision and the
+injection-seam table; `operations.rst` carries the busy-state and
+uniqueness policy, including why Update Analysis is gated now when Module 3
+deliberately allowed it, matching the README's carried-over-changes section.
+`testing.rst` carries the marker table (rewritten as a `list-table`: the
+scaffolded simple table was malformed RST, with cell text such as
+`` ``integration`` `` wider than the column the `====` header declared),
+the fixture/test-double reference, and the same "why the suite grew past
+five files" story as the README.
 
-- `orm_queries.py`'s twelve runner functions (`q1` through `uq2`,
-  `dataset_summary`, `all_results`) have no docstrings, and `conf.py` sets
-  `undoc-members: True`, so autodoc will render them as bare signatures. One
-  rubric point is for documentation being "clear, organized, and
-  professional". Give each a one-line docstring.
-- `architecture.rst` must carry the JSON-versus-redirect decision and
-  `operations.rst` the busy-state and uniqueness policy, including why Update
-  Analysis is now gated when Module 3 deliberately allowed it. The README
-  needs the same explanation in its carried-over-changes section.
+**Build verified clean**, exactly as documented (`sphinx-build -b html docs
+docs/_build/html`, no `-n`, no `-W` needed): zero warnings, zero errors.
+Checked separately with `-n -W` (nitpicky): found 6 broken `:func:`/`:class:`
+cross-references, all in the new content, all because `conf.py` does not
+set `private-members` so autodoc never generates pages for underscore-
+prefixed functions; fixed by switching those six to plain code literals,
+since they are implementation details explained in prose, not part of the
+linkable public API. 8 nitpick-only warnings remain, all pre-existing
+(`api.rst`'s `automodule` directives surfacing SQLAlchemy's own type hints
+and `DeclarativeBase`-inherited docstrings, e.g. `MetaData`, `_RegistryType`),
+not introduced by anything in this phase, and harmless either way:
+`.readthedocs.yaml` already sets `fail_on_warning: false`, and they do not
+appear under the actual build command at all, only under `-n`.
 
-Section titles the source now references by name, which the README must
-therefore actually use: **Additional columns** (`models.py`), **LLM
-standardizer setup** (`pull_data.py`), **Validity ranges** (`query_data.py`).
+Still open, by design (would publish an unfinished site otherwise):
+
+- Make the repo public. Checked first: `.env` has never been committed in
+  this repo's history (`git log --all --diff-filter=A` for it is empty),
+  and no password/secret-shaped string is committed anywhere; going public
+  exposes ordinary coursework, not credentials.
+- Connect Read the Docs (needs the public repo first) and link the
+  published URL from `module_4/README.md`, replacing its two "pending"
+  notes (the header line and the Documentation section).
+
+Section titles the source references by name, confirmed present in the
+README: **Additional columns** (`models.py`), **LLM standardizer setup**
+(`pull_data.py`), **Validity ranges** (`query_data.py`).
 
 ## Rubric traceability
 
