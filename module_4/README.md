@@ -13,6 +13,44 @@
 > "section 5.2"; renumbering during this module broke those references silently.
 > Source comments now name headings by title instead.
 
+## Deliverables checklist
+
+Checked against the assignment's own numbered deliverables list, each item
+verified against the repository as it stands rather than assumed.
+
+- [x] **SSH URL to the GitHub repository** —
+      `git@github.com:5th-legionnaire/jhu_software_concepts.git` (above).
+- [x] **README under `module_4`** — this file.
+- [x] **`requirements.txt` under `module_4`** — [requirements.txt](requirements.txt),
+      Module 4 specific, covering the app, ETL, tests, coverage, and Sphinx.
+- [x] **Sphinx-generated HTML** — `docs/` builds clean with the exact
+      command below (zero warnings, zero errors) and is published live; see
+      [Documentation](#documentation). The build output itself is not
+      committed, matching this project's own `.gitignore` and the rubric's
+      own wording ("built under `module_4/docs/`" plus "published ... and
+      linked from the README," neither of which names a committed
+      `_build/` directory).
+- [x] **Proof of coverage, `coverage_summary.txt` under `module_4`** —
+      [coverage_summary.txt](coverage_summary.txt): 102 tests, 100.00% coverage.
+- [x] **Proof of successful GitHub Actions CI** —
+      [actions_success.png](actions_success.png) (a real, verified green run,
+      not a staged image) and [`../.github/workflows/tests.yml`](../.github/workflows/tests.yml)
+      directly under the repository root, not under `module_4`.
+- [x] **Link to the Read the Docs documentation** — in the header above and
+      in [Documentation](#documentation).
+- [x] **All listed test files, under `module_4`** — the five the assignment
+      names, plus five more `--cov-fail-under=100` made necessary; see
+      [The five files beyond the required five](#the-five-files-beyond-the-required-five).
+- [ ] **Submitted to both Canvas and the public GitHub repository** — the
+      repository is public and this commit is pushed; the Canvas submission
+      itself is outside this repository and is not something committing code
+      can confirm.
+
+Verified, not assumed, while building this list: every one of the 102 tests
+carries a required marker (`pytest -m "web or buttons or analysis or db or
+integration"` collects exactly 102, the same as collecting with no marker
+filter at all, so nothing is silently excluded or silently unmarked).
+
 ## Overview
 
 This module adds an automated test suite, continuous integration, and published
@@ -684,3 +722,28 @@ module in `src/`, a testing guide, and operational notes.
 5. **A pull started from the web page does not survive a restart.** Busy state
    lives in the application process. Restarting the server mid-pull forgets the
    running pull, as it did in Module 3.
+
+## Development process
+
+Module 4 was built spec-driven rather than file-by-file: `PLAN.md`, in this
+same directory, is the living plan, not a one-time proposal. It lays out
+five phases (0 through 4, matching the sections above) _before_ any of
+them were built, then each phase's section was rewritten afterward to say
+what was actually built, including the three places execution diverged from
+the plan and why: `runner` as a seam separate from `scraper`/`loader`
+(Phase 0), two application fixtures instead of one because no single fixture
+could serve both halves of the suite (Phase 1), and the scraper
+orchestration having zero test coverage despite `test_buttons.py` doing
+exactly what the assignment asked of it (also Phase 1, caught mid-review).
+Every phase ended with a working, tested, committed state before the next
+began, and every commit in this module's history corresponds to one of
+those boundaries.
+
+This module also moved to consistent use of Claude Code, the terminal-based
+tool, for the whole of the work, rather than the mix of Claude's desktop and
+web apps used on earlier modules. The practical effect was a single
+continuous session with direct access to the repository, the test runner,
+and a live PostgreSQL connection throughout: every claim in this README
+about test counts, coverage percentages, and build output was run and
+checked in that session, not written from memory or assumption. `PLAN.md`
+is the record of that; this README is the summary of it.
