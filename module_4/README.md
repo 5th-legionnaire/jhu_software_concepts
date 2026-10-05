@@ -603,8 +603,25 @@ to dependencies that were already there rather than new ones:
 ### The five files beyond the required five
 
 `pytest.ini` sets `--cov-fail-under=100` against all of `src/`, not only the
-code the five required files reach. Five more files close what they leave
-dark, each for a specific, named reason rather than to pad the number:
+code the five required files reach, and two facts about Module 3's own
+design are what make that gap real rather than theoretical:
+
+- **Two independent paths to the same nine questions.** Module 3 built
+  `query_data.py` (raw SQL) and `orm_queries.py` (the ORM) side by side, and
+  wired only the ORM path into the Flask page. `query_data.py` still ships in
+  `src/` for its own command line (`python3 src/query_data.py`); the app
+  never calls it, and no test aimed at app _behavior_ ever would either.
+- **Command-line entry points nothing in the web app reaches.** `main()` in
+  every module, `models.py`'s `_verify_mapping()`, and `scrape.py`'s
+  `scrape_data()` (the one-time historical batch scraper that produced the
+  original 30,000-row dataset, superseded for ongoing use by Pull Data's
+  incremental pull in `pull_data.py` but still present in `src/`) are each
+  reachable only by calling the function directly, not by posting to a route
+  or faking the scraper at the `create_app()` boundary.
+
+Five more files close what the five required ones leave dark because of
+those two facts, each for a specific, named reason rather than to pad the
+number:
 
 | File | Marker | Why it exists |
 | --- | --- | --- |

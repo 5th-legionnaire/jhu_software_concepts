@@ -1,4 +1,3 @@
-$ pytest -m "web or buttons or analysis or db or integration"
 ........................................................................ [ 70%]
 ..............................                                           [100%]
 ================================ tests coverage ================================
@@ -17,4 +16,4 @@ src/scrape.py          107      0   100%
 --------------------------------------------------
 TOTAL                  802      0   100%
 Required test coverage of 100% reached. Total coverage: 100.00%
-102 passed in 0.79s
+102 passed in 0.77s
