@@ -167,5 +167,5 @@ def _verify_mapping():
     print(f"Newest entry: {newest!r}")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - command line entry point
     _verify_mapping()

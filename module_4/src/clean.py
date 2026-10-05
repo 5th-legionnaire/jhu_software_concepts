@@ -231,5 +231,5 @@ def load_data(filename="applicant_data.json"):
     return records
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - command line entry point
     save_data(clean_data(), "applicant_data.json")

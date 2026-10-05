@@ -343,5 +343,5 @@ def main():
                 print(f"\n-- {label}\n{_sql(build())}")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - command line entry point
     main()

@@ -17,8 +17,11 @@ import json
 
 import pytest
 
+import clean
+import pull_data as pd
+import scrape as scrape_module
 from clean import clean_data
-from pull_data import PullError, _standardize, scrape_new_records
+from pull_data import PullError, _standardize, load_records, scrape_new_records
 
 pytestmark = pytest.mark.buttons
 
@@ -165,6 +168,30 @@ def test_stops_at_the_database_newest_id_across_pages(tmp_path, monkeypatch):
     assert all("llm-generated-program" in r for r in records)
 
 
+def test_scrape_new_pages_stops_when_a_page_has_no_result_links(tmp_path, monkeypatch):
+    """Distinct from "nothing new": this page has no results at all, not
+    merely results already in the database."""
+    monkeypatch.setattr("pull_data.PAGES_DIR", str(tmp_path / "pages"))
+    result = scrape_new_records(
+        session_factory=_session_factory(9000000),
+        browser_factory=_FakeDriver,
+        fetch_html=_FetchQueue(["<html><body>no results here</body></html>"]))
+    assert result == []
+
+
+def test_scrape_new_records_raises_when_the_standardizer_fails(tmp_path, monkeypatch):
+    monkeypatch.setattr("pull_data.PAGES_DIR", str(tmp_path / "pages"))
+    monkeypatch.setattr("pull_data.LLM_PYTHON", __file__)
+    page = _page(_entry_row(p_id=9000002))
+
+    with pytest.raises(PullError, match="LLM standardizer failed"):
+        scrape_new_records(
+            session_factory=_session_factory(9000001),
+            browser_factory=_FakeDriver,
+            fetch_html=_FetchQueue([page]),
+            standardize=lambda records: None)
+
+
 def test_missing_llm_environment_raises_pull_error(tmp_path, monkeypatch):
     """A standardizer environment that was never set up stops the pull."""
     monkeypatch.setattr("pull_data.PAGES_DIR", str(tmp_path / "pages"))
@@ -266,3 +293,120 @@ def test_clean_data_deduplicates_by_url(tmp_path):
     (tmp_path / "page_0002.html").write_text(_page(entry), encoding="utf-8")
 
     assert len(clean_data(str(tmp_path))) == 1
+
+
+def test_clean_data_handles_a_dateless_status_full_gre_badges_and_a_comment(tmp_path):
+    """_entry_row above is deliberately minimal; this exercises what it never
+    does: a status with no "on <date>" suffix, all three GRE badges (GRE AW
+    and GRE V must be checked before the plain GRE prefix they overlap), and
+    a comment row distinguished from the badge row by having no badge divs.
+    """
+    page = """
+    <html><body><table><tbody>
+    <tr>
+      <td>Carnegie Mellon University</td>
+      <td><span>Computer Science</span><span>PhD</span></td>
+      <td>Sep 12, 2026</td>
+      <td>Wait listed</td>
+      <td><a href="/result/9000005">See more</a></td>
+    </tr>
+    <tr><td>
+      <div class="tw-inline-flex">Fall 2026</div>
+      <div class="tw-inline-flex">American</div>
+      <div class="tw-inline-flex">GPA 3.70</div>
+      <div class="tw-inline-flex">GRE 165</div>
+      <div class="tw-inline-flex">GRE V 160</div>
+      <div class="tw-inline-flex">GRE AW 5</div>
+    </td></tr>
+    <tr><td>Great campus visit, friendly faculty.</td></tr>
+    </tbody></table></body></html>
+    """
+    (tmp_path / "page_0001.html").write_text(page, encoding="utf-8")
+
+    records = clean_data(str(tmp_path))
+
+    assert len(records) == 1
+    record = records[0]
+    assert record["status"] == "Wait listed"
+    assert record["decision_date"] == ""
+    assert record["GRE"] == "GRE 165"
+    assert record["GRE V"] == "GRE V 160"
+    assert record["GRE AW"] == "GRE AW 5"
+    assert record["comments"] == "Great campus visit, friendly faculty."
+
+
+def test_clean_data_with_no_directory_returns_an_empty_list():
+    assert clean_data("/nonexistent/path/this-does-not-exist-9000") == []
+
+
+def test_clean_data_with_no_table_on_the_page_returns_no_records(tmp_path):
+    (tmp_path / "page_0001.html").write_text(
+        "<html><body>no results table here</body></html>", encoding="utf-8")
+    assert clean_data(str(tmp_path)) == []
+
+
+def test_clean_load_data_reads_records_back_from_json(tmp_path):
+    """clean.py's own load_data(), distinct from load_data.py's; nothing else
+    in the suite calls it."""
+    path = tmp_path / "applicant_data.json"
+    path.write_text(json.dumps([{"program": "Computer Science"}]), encoding="utf-8")
+    assert clean.load_data(str(path)) == [{"program": "Computer Science"}]
+
+
+# --- pull_data._start_browser: delegates to scrape, with no browser launched
+
+def test_pull_data_start_browser_opens_a_visible_window(monkeypatch):
+    """Pull Data always shows the window, since the first run needs it for
+    Cloudflare; this is what proves headless=False actually reaches scrape.py."""
+    class _FakeChrome:
+        def __init__(self, options):
+            self.options = options
+
+    monkeypatch.setattr(scrape_module.webdriver, "Chrome", _FakeChrome)
+
+    driver = pd._start_browser()
+
+    assert not any("--headless=new" in arg for arg in driver.options.arguments)
+
+
+# --- load_records: the two branches the route's own tests never reach ------
+
+def test_load_records_with_no_records_returns_zero_without_connecting():
+    def _unused_connect():
+        raise AssertionError("connect must not be called when there is nothing to load")
+
+    assert load_records([], connect=_unused_connect) == 0
+
+
+def test_load_records_raises_when_the_database_is_unreachable():
+    with pytest.raises(PullError, match="database could not be reached"):
+        load_records([{"url": "x"}], connect=lambda: None)
+
+
+# --- main: the command-line entry point, all three outcomes ----------------
+
+def test_main_reports_entries_added(monkeypatch, capsys):
+    monkeypatch.setattr(pd, "scrape_new_records", lambda: ["record1", "record2"])
+    monkeypatch.setattr(pd, "load_records", lambda records: len(records))
+
+    assert pd.main() == 0
+    assert "Added 2 new entries" in capsys.readouterr().out
+
+
+def test_main_reports_nothing_new(monkeypatch, capsys):
+    monkeypatch.setattr(pd, "scrape_new_records", lambda: [])
+    monkeypatch.setattr(pd, "load_records", lambda records: 0)
+
+    assert pd.main() == 0
+    assert "no new entries" in capsys.readouterr().out
+
+
+def test_main_reports_a_pull_error(monkeypatch, capsys):
+    def _failing_scraper():
+        raise PullError("stopped for a test reason")
+
+    monkeypatch.setattr(pd, "scrape_new_records", _failing_scraper)
+    monkeypatch.setattr(pd, "load_records", lambda records: 0)
+
+    assert pd.main() == 1
+    assert "Stopped: stopped for a test reason" in capsys.readouterr().out

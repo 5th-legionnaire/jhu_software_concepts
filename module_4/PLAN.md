@@ -194,22 +194,91 @@ here because it cost real debugging time once; a password containing `@`,
 `/`, or `:` must be percent-encoded by whoever writes the `.env` or exports
 `DATABASE_URL`.
 
-## Phase 2: coverage to 100 (IN PROGRESS: 58% -> 73.47%)
+## Phase 2: coverage to 100 (COMPLETE)
 
-Run `pytest` and work `term-missing` top down. Expected trouble spots:
+```
+TOTAL  802  0  100%
+Required test coverage of 100% reached. Total coverage: 100.00%
+102 passed in 0.79s
+```
 
-- `scrape.py` imports Selenium at module scope and builds a Chrome driver.
-  Inject a driver factory; pragma only the driver construction itself.
-  `scrape_data()` and `_fetch_html()` are now the only uninjected Selenium
-  callers left, since `pull_data` takes a `browser_factory`.
-- `__main__` blocks in every module. `# pragma: no cover` with a reason on
-  each. Done already in `app.py` and `pull_data.py`.
-- `check_llm.py`, `run_llm.sh`, and `llm_hosting/` are deliberately outside
-  `src/` so they do not count. Leave them there.
-- `orm_queries.py` and `query_data.py` each carry a `main()` and an `_sql()`
-  debug helper that only the CLI reaches. Cover them with a session double
-  rather than pragma: they are pure result formatting.
-- Commit the terminal summary to `module_4/coverage_summary.txt`.
+Committed to `module_4/coverage_summary.txt`, produced by
+`pytest -m "web or buttons or analysis or db or integration"` exactly as the
+README documents running it.
+
+Worked `term-missing` top down, file by file, after `test_pull_pipeline.py`
+(below) closed the scraper gap: `query_data.py` (51% -> 100%), `scrape.py`
+(39% -> 100%), `load_data.py` (74% -> 100%), `models.py` (70% -> 100%),
+`orm_queries.py` (86% -> 100%), `clean.py` (83% -> 100%), `pull_data.py`
+(87% -> 100%), `app.py` (91% -> 100%). Four new test files:
+`test_scrape.py`, `test_query_data.py`, `test_load_data.py`,
+`test_orm_queries.py`, `test_models.py`; the rest extended existing files.
+
+### check_llm.py, run_llm.sh, llm_hosting/
+
+Deliberately outside `src/`, so they do not count toward `--cov=src`. Left
+there.
+
+### query_data.py: a real, unused code path, tested for real
+
+`app.py` reads results through `orm_queries.py` (the ORM path); nothing calls
+`query_data.py`'s raw-SQL `q1()` through `uq2()`, `run_all()`, `main()`. A
+fake cursor would have closed the coverage gap cheaper, but would only prove
+Python unpacks a canned tuple, not that the SQL text is still valid Postgres.
+`test_query_data.py` runs every question against the real test database
+instead, which is a stronger test for the same cost and fits the `db` marker
+exactly ("database schema/inserts/selects").
+
+### scrape.py: the same reasoning as pull_data.py, one layer down
+
+`scrape_data()`, the Module 2 one-time historical-pull function flagged as a
+coverage gap when Phase 2 began, calls `_start_browser()` directly with no
+injection point, the same problem `pull_data.py` had before Phase 0/1.
+Fixed the same way: added `browser_factory`, `fetch_html`, and `sleep`
+parameters, defaulting to the real implementations, letting
+`test_scrape.py` drive the real stop-on-no-page / stop-on-no-entries /
+stop-at-max-entries / resume-a-previous-run logic with fakes.
+`_fetch_html()`'s `TimeoutException` branch is the one place left genuinely
+untestable without either a real browser timeout or standing in for
+`WebDriverWait`'s own internal sleep; pragma'd, with the reason inline next
+to it and a pointer to this note. `_start_browser()` itself is tested by
+replacing `webdriver.Chrome` with a fake that records the `Options` it was
+given (Selenium's `Options.arguments` is a public list), proving the
+persistent-profile and headless configuration without launching Chrome.
+
+### load_data.py, models.py, orm_queries.py: error paths and unreached CLIs
+
+Most of each module ran already, indirectly, through `insert_records()` and
+ORM calls elsewhere in the suite. What was missing were specific branches
+nothing else reaches: the `PG*` fallback when `DATABASE_URL` is unset, a
+connection refused (port `1`, instant and reliable), a failed statement
+(`SELECT` against a table that does not exist), blank-to-`None` conversion
+for every field type, `_resume()`'s zero-rows and prior-run-found cases, and
+each module's own `main()`. `models.py`'s `_verify_mapping()` mismatch branch
+is tested by faking the SQLAlchemy inspector's `get_columns()` result rather
+than corrupting the real test schema to force a mismatch; the match branch
+runs for real, against the schema `load_data.create_table()` actually
+builds, so it is a genuine proof the ORM model is still in sync, not a
+coverage formality.
+
+### app.py: two branches, two helper functions
+
+`run_in_background()` (the real, non-testing runner) and the lambda
+`make_scraper()` returns are never reached, because every test app passes
+`testing=True` and an explicit `scraper`. Tested directly: `run_in_background`
+with a `threading.Event` the job sets (a synchronization primitive, not a
+fixed-duration `sleep()`, with a generous timeout only as a hang safety net);
+`make_scraper` with `app.scrape_new_records` monkeypatched to a recorder,
+proving the returned closure is bound to the right `session_factory` without
+attempting a real scrape. The two `SQLAlchemyError` branches
+(`/update-analysis` and `/analysis`, both 503) needed a `query` fake that
+raises, which nothing had exercised.
+
+### Pragma count: 9, all named, both sanctioned categories
+
+Eight `__main__` blocks, one per `src/` module that has one. One real-Selenium-
+timeout branch in `scrape._fetch_html()`. Under the limit of ten; none widen
+an existing pragma to cover more than its one line or block.
 
 ### Closed: the scraper orchestration had zero coverage
 

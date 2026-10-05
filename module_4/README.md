@@ -57,7 +57,12 @@ module_4/
 │   ├── test_buttons.py         button endpoints and busy-state gating
 │   ├── test_analysis_format.py labels and percentage formatting
 │   ├── test_db_insert.py       database writes, uniqueness, query contract
-│   └── test_integration_end_to_end.py   pull → update → render
+│   ├── test_integration_end_to_end.py   pull → update → render
+│   ├── test_pull_pipeline.py   the real scraper orchestration and clean.py
+│   ├── test_scrape.py          URL building, page helpers, the batch scraper
+│   ├── test_query_data.py      the raw-SQL analyses, against a real database
+│   ├── test_orm_queries.py     the --sql debug output and main()
+│   └── test_models.py          the Applicant model and the default session
 ├── docs/                       Sphinx project
 ├── data/                       bulk JSON input, never imported
 ├── llm_hosting/                instructor-provided LLM standardizer
@@ -67,6 +72,11 @@ module_4/
 ├── coverage_summary.txt        committed terminal coverage output
 └── actions_success.png         screenshot of a green CI run
 ```
+
+The five files the assignment names directly hold the required rubric
+behavior; the other five exist because `--cov-fail-under=100` is scoped to
+all of `src/`, not only the code those five reach. See
+[Testing](#testing) for why each exists and what it covers.
 
 `src/` modules import each other flatly (`from models import ...`), and
 `tests/conftest.py` puts `src/` on `sys.path`. `src/` is deliberately not a
@@ -515,9 +525,6 @@ below 5.00% of the dataset so thin evidence reads as thin.
 
 ## Testing
 
-_Coverage is not yet at the required 100%; see `PLAN.md` for the current
-phase. The figures and test counts below are measured, not projected._
-
 The full suite runs from `module_4/`, because `pytest.ini` scopes coverage to
 `src/` relative to itself:
 
@@ -593,8 +600,42 @@ to dependencies that were already there rather than new ones:
   seconds) in the middle of a test suite that is supposed to run in seconds,
   not minutes.
 
-_Pending: the final coverage figure and the contents of
-`coverage_summary.txt`, committed once Phase 2 reaches 100%._
+### The five files beyond the required five
+
+`pytest.ini` sets `--cov-fail-under=100` against all of `src/`, not only the
+code the five required files reach. Five more files close what they leave
+dark, each for a specific, named reason rather than to pad the number:
+
+| File | Marker | Why it exists |
+| --- | --- | --- |
+| `test_pull_pipeline.py` | `buttons` | see above: the scraper's real orchestration and `clean.py`'s HTML parsing |
+| `test_scrape.py` | `buttons` | `scrape_data()`, the Module 2 batch scraper the Pull Data button never calls but `src/` still contains; gained the same `browser_factory`/`fetch_html`/`sleep` seams as `pull_data.py`, for the same reason |
+| `test_query_data.py` | `db` | the raw-SQL analyses, a second, independent path to the same questions that `app.py` never reads; run against a real database rather than a fake cursor, so the SQL text itself is proven, not just the Python that unpacks it |
+| `test_orm_queries.py` | `db` | the `--sql` debug output and `main()`, which `app.py`'s use of the same functions never reaches |
+| `test_models.py` | `db` | the module-level, cache-for-the-process `get_engine()`/`get_session()` the command-line scripts use, and `_verify_mapping()`, which doubles as a genuine proof the `Applicant` model still matches the live schema |
+
+Coverage, from `coverage_summary.txt`:
+
+```text
+Name                 Stmts   Miss  Cover
+-----------------------------------------
+src/app.py             114      0   100%
+src/clean.py            91      0   100%
+src/load_data.py       110      0   100%
+src/models.py           64      0   100%
+src/orm_queries.py     118      0   100%
+src/pull_data.py       116      0   100%
+src/query_data.py       82      0   100%
+src/scrape.py          107      0   100%
+-----------------------------------------
+TOTAL                  802      0   100%
+102 passed in 0.79s
+```
+
+Nine `# pragma: no cover` lines across `src/`, each with a one-line reason
+beside it: one per module's `if __name__ == "__main__":` block, and one
+branch in `scrape._fetch_html()` that a real Selenium timeout or standing in
+for `WebDriverWait`'s own internal sleep are the only ways to reach.
 
 ## Documentation
 

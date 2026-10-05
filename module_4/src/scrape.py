@@ -3,7 +3,11 @@ scrape.py — GradCafe admissions results scraper.
 
 EN 605.256 Modern Software Concepts in Python, Module 4.
 Joshua Latz (jlatz1)
-Written for Module 2 and carried over unchanged.
+Written for Module 2. Module 4 adds browser_factory, fetch_html, and sleep
+injection seams to scrape_data(), for the same reason pull_data.py added the
+same seams: so a test can stand in for Chrome and for waiting, without
+launching a real browser or calling sleep(). The scraping logic itself is
+unchanged.
 
 Contains:
     scrape_data() — pull raw result pages from GradCafe and save them
@@ -160,7 +164,12 @@ def _fetch_html(driver, url):
         WebDriverWait(driver, PAGE_TIMEOUT).until(
             EC.presence_of_element_located((By.CSS_SELECTOR, 'a[href*="/result/"]'))
         )
-    except TimeoutException:
+    # Reaching this branch for real means either a real browser genuinely
+    # timing out or standing in for WebDriverWait's own internal sleep; both
+    # are excluded by this suite's no-real-browser, no-sleep() constraints.
+    # pull_data.py injects fetch_html precisely so production code reaches
+    # this line while tests never do.
+    except TimeoutException:  # pragma: no cover - real Selenium wait, see above
         if _is_challenge(driver.page_source):
             print("Cloudflare verification appeared. Clear it in the browser "
                   "window, then run the script again to resume.")
@@ -203,7 +212,8 @@ def _resume(out_dir):
 
 
 def scrape_data(added_start, added_end, max_entries=30000, out_dir=RAW_DIR,
-                delay=2, headless=False):
+                delay=2, headless=False, browser_factory=None, fetch_html=None,
+                sleep=time.sleep):
     """Save raw GradCafe result pages for one date window.
 
     Args:
@@ -213,17 +223,28 @@ def scrape_data(added_start, added_end, max_entries=30000, out_dir=RAW_DIR,
         out_dir:     directory to write page HTML into.
         delay:       seconds to wait between page requests, to be polite.
         headless:    run Chrome without a window. Leave False on the first run.
+        browser_factory: callable returning a Selenium driver. Defaults to
+            _start_browser(headless=headless). Injected so a test can stand
+            in for Chrome, the same seam pull_data.py uses for Pull Data.
+        fetch_html: callable(driver, url) returning a page's HTML or None.
+            Defaults to _fetch_html. See _fetch_html's own docstring for why
+            this is the one piece a test replaces rather than drives for real.
+        sleep: the delay between page requests. Injected so a test passes a
+            no-op rather than waiting out a real `delay` between pages.
 
     Returns the number of applicant entries saved.
     """
+    browser_factory = browser_factory or (lambda: _start_browser(headless=headless))
+    fetch_html = fetch_html or _fetch_html
+
     os.makedirs(out_dir, exist_ok=True)
     page_count, entry_count, cursor = _resume(out_dir)
 
-    driver = _start_browser(headless=headless)
+    driver = browser_factory()
     try:
         while entry_count < max_entries:
             url = _build_url(added_start, added_end, cursor)
-            html = _fetch_html(driver, url)
+            html = fetch_html(driver, url)
             if html is None:
                 print("Stopping: could not retrieve the page.")
                 break
@@ -244,7 +265,7 @@ def scrape_data(added_start, added_end, max_entries=30000, out_dir=RAW_DIR,
                 print("Stopping: no more pages.")
                 break
 
-            time.sleep(delay)
+            sleep(delay)
     finally:
         driver.quit()
 
@@ -261,6 +282,6 @@ def save_data(records, filename="applicant_data.json"):
     print(f"Saved {len(records)} records to {filename}")
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover - command line entry point
     total = scrape_data(added_start="2026-01-01", added_end="2026-09-14")
     print(f"Done. {total} entries saved under {RAW_DIR}/.")

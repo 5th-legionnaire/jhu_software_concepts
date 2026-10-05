@@ -5,6 +5,7 @@ Error-Path, and Deterministic Behavior Tests" (8 pts).
 """
 
 import pytest
+from sqlalchemy.exc import SQLAlchemyError
 
 from app import create_app
 
@@ -62,3 +63,28 @@ def test_loader_failure_yields_non_200_and_no_partial_write(failing_scraper, fak
     assert response.status_code != 200
     assert response.get_json()["ok"] is False
     assert fake_loader.calls == []
+
+
+def test_post_pull_data_returns_202_when_the_runner_defers(fake_scraper, fake_loader,
+                                                            fake_query, db_url):
+    """A non-testing app's runner starts a background pull and returns None
+    immediately; the route must answer 202, not wait for a result to report."""
+    deferred = create_app(scraper=fake_scraper, loader=fake_loader, query=fake_query,
+                          runner=lambda job: None, database_url=db_url, testing=True)
+    response = deferred.test_client().post("/pull-data")
+
+    assert response.status_code == 202
+    assert response.get_json() == {"ok": True, "started": True}
+
+
+def test_update_analysis_returns_503_when_the_database_is_unreachable(fake_scraper, fake_loader,
+                                                                       db_url):
+    def _raising_query():
+        raise SQLAlchemyError("connection refused")
+
+    broken = create_app(scraper=fake_scraper, loader=fake_loader, query=_raising_query,
+                        database_url=db_url, testing=True)
+    response = broken.test_client().post("/update-analysis")
+
+    assert response.status_code == 503
+    assert response.get_json()["ok"] is False
