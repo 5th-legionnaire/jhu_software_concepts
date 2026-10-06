@@ -105,6 +105,17 @@ This list mirrors them.
   Module 5. Provenance references to Modules 2, 3, and 4 are unchanged
   throughout.
 
+### Phase 6 amendments, decided in advance
+
+- **A6.1 Compiled-SQL check allows exactly the Phase 3 LIMIT.** Phase 3
+  adds a LIMIT to every ORM statement, so the compiled SQL can no longer equal
+  the Phase 0 snapshot. Phase 6's `test_compiled_sql_unchanged` therefore
+  checks every `*_stmt()` builder against the Phase 0 snapshot with one
+  allowance. The compiled text must be the snapshot text plus exactly one
+  trailing `LIMIT` clause. The bound parameters must be the snapshot's plus
+  that one limit value. The snapshot is never re-captured, so the test still
+  shows that the LIMIT is the only change.
+
 ## Deliverables checklist
 
 Checked against the assignment's own numbered deliverables list, each item

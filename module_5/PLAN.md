@@ -585,6 +585,13 @@ for Josh's existing local DB.
 **Exit:** standard gate (G3 is now exactly 10.00 with zero message lines) plus: `pylint_report.txt`
 committed. `test_compiled_sql_unchanged` passes. Behavior parity holds (the run_all snapshot still passes).
 
+**Amendments** (decided 2026-10-05 during the Phase 0 review, mirrored in README "Changes to the plan")
+- **A6.1** Phase 3 adds a LIMIT to every ORM statement, so the compiled SQL can no longer equal the
+  Phase 0 snapshot. `test_compiled_sql_unchanged` instead asserts, for every `*_stmt()` builder, that the
+  compiled text is the Phase 0 snapshot text followed by exactly one trailing `LIMIT` clause, and that
+  the bound parameters are the snapshot's parameters plus that one limit value. The Phase 0 snapshot is
+  never re-captured, so the test shows the LIMIT is the only change across Phases 3 and 6.
+
 ### Phase 7: Dependency graph
 
 **Entry:** standard. `dot -V` works. Pylint at 10, so the module structure is final.
