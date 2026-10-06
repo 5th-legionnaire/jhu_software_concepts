@@ -26,6 +26,71 @@ gives the problem, the decision, and the trade-off accepted, and names the
 tests that verify it. `scripts/gate.sh` refuses to pass a phase whose rows lack
 a subsection here.
 
+<a id="chg-01"></a>
+
+### CHG-01: `setup.py` and an editable install replace the `sys.path` edit
+
+**Problem.** Module 4's `tests/conftest.py` put `src/` on `sys.path` so that
+the flat modules (`from models import ...`) would import. Imports resolved
+one way under pytest and another way everywhere else. A packaging defect,
+such as a module that nothing declared, would stay hidden until the code ran
+on someone else's machine.
+
+**Decision.** `setup.py` declares the application as flat modules,
+`package_dir={"": "src"}` with an explicit `py_modules` list, and the
+supported install is editable:
+
+```bash
+pip install -r requirements.txt
+pip install -e . --no-deps
+```
+
+The conftest path edit is gone. Imports now resolve the same way in local
+runs, tests, and CI. Two new modules, `db_safety` and `applicant_search`,
+are declared and exist as empty stubs until Phases 3 and 4 fill them in.
+This keeps Module 4's import contract: no `src/` file changed its imports.
+
+**Trade-off.** A non-editable `pip install .` would not carry `templates/`
+and `static/`, because flat modules have no package to hold package data.
+Only the editable install is supported.
+
+**Verified by.**
+`tests/test_packaging.py::test_modules_import_from_installed_location`. Every
+declared module imports, and from `module_5/src`.
+`::test_setup_py_declares_every_src_module` keeps `py_modules` in step with
+`src/`. `::test_no_sys_path_mutation_in_conftest`.
+`scripts/fresh_install_check.sh` installs a clean copy with pip and with uv
+and runs the suite in each.
+
+<a id="chg-02"></a>
+
+### CHG-02: `requirements.txt` is a full lock generated from `setup.py`
+
+**Problem.** Module 4's `requirements.txt` listed top-level packages only.
+`uv pip sync` installs exactly what the file lists and resolves nothing. From
+that file it would build an environment without Werkzeug or Jinja2, in which
+Flask cannot start. Snyk would also see only part of the dependency tree.
+
+**Decision.** `setup.py` is now the only place dependencies are edited:
+runtime in `install_requires`, tooling in a `dev` extra, each with the reason
+for it carried over from Module 4's annotations. `scripts/regen_lock.sh` runs
+`uv pip compile setup.py --extra dev --universal` to produce
+`requirements.txt`, which pins all 70 packages, transitive ones included,
+with platform markers where a package is OS-specific. It has no hashes,
+because `pip install -r` with hashes would reject the editable install that
+follows. Every runtime pin is the same version Module 4 used.
+
+**Trade-off.** The lock is generated, so a hand edit to it is overwritten.
+Changing a dependency means editing `setup.py` and rerunning
+`scripts/regen_lock.sh`.
+
+**Verified by.** `tests/test_packaging.py::test_lock_pins_every_line`,
+`::test_lock_includes_tooling` (pylint, pydeps),
+`::test_lock_includes_transitive_runtime` (Werkzeug, Jinja2),
+`::test_lock_satisfies_setup_py_ranges`. That last test fails if `setup.py`
+is edited without regenerating the lock. The uv leg of
+`scripts/fresh_install_check.sh` runs too.
+
 <a id="chg-18"></a>
 
 ### CHG-18: The whole suite runs, and an unmarked test stops it
@@ -104,6 +169,33 @@ This list mirrors them.
   is edited in this phase, so its attribution byline was also updated to
   Module 5. Provenance references to Modules 2, 3, and 4 are unchanged
   throughout.
+
+### Phase 1 amendments
+
+- **A1.1 The lock is universal.** `scripts/regen_lock.sh` passes
+  `--universal --python-version 3.14` instead of `-p 3.14`. The lock is
+  then valid on the grader's machine, the Linux CI runner, and Windows, not
+  only the machine that generated it. It has 70 entries rather than the
+  spike's 59. The extras are Windows-only packages behind platform markers
+  (`colorama`, `tzdata`, `cffi`, `pycparser`) and `packaging` (A1.2).
+- **A1.2 `packaging` is a declared dev dependency.** `tests/test_packaging.py`
+  imports it directly to parse requirements, so it is listed in the `dev`
+  extra rather than relied on as a transitive package. Two tests the plan did
+  not name were added: `test_setup_py_declares_every_src_module` and
+  `test_lock_satisfies_setup_py_ranges`.
+- **A1.3 The fresh-install check can test the working tree.** The gate runs
+  before the phase commit exists, so `scripts/fresh_install_check.sh
+  --worktree` tests the tree about to be committed. With no argument it tests
+  `HEAD`, which is what Phase 11 uses. It copies `module_5` out with
+  `git archive` rather than `git clone`. The content is the same, and nothing
+  untracked or ignored comes along.
+- **A1.4 Coverage is off in the fresh-install test run.** The plan's
+  `pytest -m "not db and not integration"` deselects the database tests, which
+  are what cover the remaining lines, so the 100% gate would fail it. That run
+  passes `--no-cov`. The full gate still enforces 100%.
+- **A1.5 Build output is ignored.** The editable install writes
+  `src/gradcafe_analytics.egg-info/`, so `*.egg-info/` and `build/` are in
+  `.gitignore`.
 
 ### Phase 6 amendments, decided in advance
 

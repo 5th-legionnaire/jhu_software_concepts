@@ -4,7 +4,8 @@ EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
 
 Written for Module 4. Module 5 adds the marker policy hook at the end of this
-file (CHG-18 in CHANGES.md).
+file (CHG-18 in CHANGES.md) and drops the sys.path edit in favor of the
+editable install (CHG-01).
 
 No test in this suite touches the live internet, launches a browser, runs a
 real scrape, or calls sleep(). The scraper, loader, and query functions reach
@@ -24,18 +25,13 @@ Two application fixtures, for two different needs:
 import configparser
 import datetime
 import os
-import sys
 
 import pytest
 
-# The application modules live in src/ and import each other flatly
-# (``from models import ...``), so src/ goes on the path rather than being
-# turned into a package.
-SRC = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src")
-if SRC not in sys.path:
-    sys.path.insert(0, SRC)
-
-from app import create_app  # noqa: E402 (import must follow the sys.path edit above)
+# The flat src/ modules resolve through the editable install
+# (pip install -e ., see setup.py), the same way they do in the app and in CI,
+# so nothing here edits sys.path (CHG-01).
+from app import create_app
 from load_data import create_connection, create_table, execute_query, get_db_config
 from models import make_session_factory
 

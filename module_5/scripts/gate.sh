@@ -195,6 +195,25 @@ assert 'Q1' in response.get_data(as_text=True)
 " >/dev/null 2>&1 || fail G9 "/analysis did not render against the local database"
         ok G9 "/analysis renders against the local database"
         ;;
+    1)
+        # Every requirement line in the lock is an exact pin.
+        local pins reqs
+        pins="$(grep -c "==" requirements.txt)"
+        reqs="$(grep -cvE '^[[:space:]]*(#|$)' requirements.txt)"
+        [ "$pins" -eq "$reqs" ] || fail G9 "requirements.txt: $pins pins but $reqs requirement lines"
+        ok G9 "requirements.txt pins all $reqs lines"
+
+        # This venv uses the editable install, not a path edit.
+        "$PY" -m pip show gradcafe-analytics >/dev/null 2>&1 \
+            || fail G9 "gradcafe-analytics is not installed in module_5/.venv (pip install -e . --no-deps)"
+        ok G9 "editable install present in module_5/.venv"
+
+        # Both installers build a working environment from a clean copy of
+        # what is about to be committed.
+        scripts/fresh_install_check.sh --worktree >"$GATE_DIR/phase-1-fresh.log" 2>&1 \
+            || fail G9 "fresh_install_check.sh failed; see .gate/phase-1-fresh.log"
+        ok G9 "fresh install passes with pip and uv"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

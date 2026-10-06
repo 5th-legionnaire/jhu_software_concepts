@@ -359,6 +359,17 @@ module_5/
 **Exit:** standard gate plus: `fresh_install_check.sh` passes both legs. `grep -c "==" requirements.txt`
 equals the non-comment line count. CHG-01 and CHG-02 are `done` with README subsections.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A1.1** The lock is compiled with `--universal --python-version 3.14`, giving 70 entries (Windows-only
+  packages behind markers, plus `packaging`), so it is valid on any grader's OS and the Linux runner.
+- **A1.2** `packaging~=26.0` is in the `dev` extra because `test_packaging.py` imports it. Two extra tests:
+  `test_setup_py_declares_every_src_module`, `test_lock_satisfies_setup_py_ranges`.
+- **A1.3** `fresh_install_check.sh --worktree` tests the tree about to be committed (gate G9); no argument
+  tests `HEAD` (Phase 11). It copies with `git archive`, not `git clone`.
+- **A1.4** The fresh-install pytest run uses `--no-cov`, since deselecting `db` and `integration` would
+  fail the 100% gate. The full gate still enforces 100%.
+- **A1.5** `*.egg-info/` and `build/` are gitignored (the editable install writes `src/*.egg-info`).
+
 ### Phase 2: Configuration and secrets (CHG-03, CHG-04)
 
 **Entry:** standard. A local `.env` exists, built from `.env.example`. Josh's real values never get committed.
