@@ -774,7 +774,7 @@ writing. Both screenshots committed. A triage table is drafted for the report.
   investigation recurs, a standing red result stops being read, suppression hides more than the finding, and a tool
   that can misread code can mislead a person), with the limit: do not add code only to satisfy a scanner.
 
-### Phase 9: GitHub Actions CI (CHG-19)
+### Phase 9: GitHub Actions CI (CHG-19) (COMPLETE)
 
 **Entry:** standard. `SNYK_TOKEN` secret present. Local gate green at Phase 8.
 
@@ -962,3 +962,4 @@ Appended by `gate.sh` at each phase exit.
 | 6 | 2026-10-05 22:37 | 2b50373 | 549 | 100.00% | 10.00 | Pylint 10.00/10 with no disables, stuck-busy fix, scrape and ORM refactors, compiled SQL and answer parity held; amendments A6.1 to A6.7. |
 | 7 | 2026-10-05 22:43 | e6366d7 | 563 | 100.00% | 10.00 | dependency.svg with collapsed packages, 7-sentence explanation verified against the edges, graph regeneration tests; amendments A7.1 to A7.5. |
 | 8 | 2026-10-05 22:59 | 68e107a | 588 | 100.00% | 10.00 | Snyk: 22 findings fixed by upgrading urllib3 and python-dotenv, 70 packages scanned, Snyk Code triaged (1 LOW accepted), CHG-21; amendments A8.1 to A8.8. |
+| 9 | 2026-10-05 23:26 | eea43e2 | 605 | 100.00% | 10.00 | Four-job CI green on run 37408248003 (669064d); hermetic suite; cruft removed; README restructured; PDF report; amendments A9.1 to A9.7, A10.1 to A10.4. |
