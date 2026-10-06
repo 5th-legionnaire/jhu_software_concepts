@@ -841,7 +841,7 @@ score is below 10" means fail on any test failure, with the 100% coverage gate o
 captured in `actions_success.png`. To prove the lint job bites, push a throwaway branch with one lint
 violation and confirm it fails red, then delete the branch.
 
-### Phase 10: Documentation and report
+### Phase 10: Documentation and report (COMPLETE)
 
 **Entry:** standard. All evidence files exist.
 
@@ -966,3 +966,4 @@ Appended by `gate.sh` at each phase exit.
 | 7 | 2026-10-05 22:43 | e6366d7 | 563 | 100.00% | 10.00 | dependency.svg with collapsed packages, 7-sentence explanation verified against the edges, graph regeneration tests; amendments A7.1 to A7.5. |
 | 8 | 2026-10-05 22:59 | 68e107a | 588 | 100.00% | 10.00 | Snyk: 22 findings fixed by upgrading urllib3 and python-dotenv, 70 packages scanned, Snyk Code triaged (1 LOW accepted), CHG-21; amendments A8.1 to A8.8. |
 | 9 | 2026-10-05 23:26 | eea43e2 | 605 | 100.00% | 10.00 | Four-job CI green on run 37408248003 (669064d); hermetic suite; cruft removed; README restructured; PDF report; amendments A9.1 to A9.7, A10.1 to A10.4. |
+| 10 | 2026-10-05 23:33 | 4e12047 | 605 | 100.00% | 10.00 | Sphinx docs rewritten for Module 5 and clean under -W; docstring fixes; report rebuilt; amendment A10.5. |
