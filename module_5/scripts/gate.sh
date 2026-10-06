@@ -407,6 +407,36 @@ assert before['vulnerabilities'], 'the before-upgrade record is empty'
         [ -s report/snyk_triage.md ] && [ -s snyk_code_report.txt ] || fail G9 "the triage or the Snyk Code report is missing"
         ok G9 "triage table and Snyk Code report present"
         ;;
+    9)
+        [ -s ../.github/workflows/ci.yml ] || fail G9 ".github/workflows/ci.yml is missing"
+        "$PY" -m pytest tests/test_ci_config.py --no-cov -p no:cacheprovider -q >"$GATE_DIR/phase-9-ci-config.log" 2>&1 \
+            || fail G9 "ci.yml no longer enforces what the assignment requires; see .gate/phase-9-ci-config.log"
+        ok G9 "ci.yml parses and every required gate is present (offline stage)"
+        git -C "$REPO" diff --quiet "1ecf2c9" -- .github/workflows/tests.yml \
+            || fail G9 "Module 4's tests.yml was modified"
+        ok G9 "tests.yml is byte-identical to the Module 4 baseline"
+
+        if [ "${GATE_CI_LIVE:-0}" = "1" ]; then
+            # Live stage: the pushed commit's run of ci.yml must have succeeded, in all four jobs.
+            command -v gh >/dev/null || fail G9 "gh is not installed"
+            local sha run
+            sha="$(git -C "$REPO" rev-parse HEAD)"
+            run="$(gh run list --workflow ci.yml --commit "$sha" --json conclusion,databaseId --jq '.[0]' 2>/dev/null)"
+            [ -n "$run" ] || fail G9 "no ci.yml run found for $sha; push first"
+            echo "$run" | grep -q '"conclusion":"success"' || fail G9 "the ci.yml run for $sha did not succeed: $run"
+            local id jobs
+            id="$(echo "$run" | "$PY" -c "import json,sys; print(json.load(sys.stdin)['databaseId'])")"
+            jobs="$(gh run view "$id" --json jobs --jq '[.jobs[] | select(.conclusion=="success")] | length')"
+            [ "$jobs" -ge 5 ] || fail G9 "expected 5 green jobs (lint, dependency-graph, snyk, test on pip and uv), found $jobs"
+            ok G9 "ci.yml run $id for $sha: success, $jobs green jobs"
+            ! cmp -s actions_success.png ../module_4/actions_success.png \
+                || fail G9 "actions_success.png is still Module 4's screenshot"
+            [ "$(head -c 8 actions_success.png | od -An -tx1 | tr -d ' ')" = "89504e470d0a1a0a" ] || fail G9 "actions_success.png is not a PNG"
+            ok G9 "actions_success.png is a PNG and is not Module 4's"
+        else
+            echo "  --  G9  live stage skipped (run GATE_CI_LIVE=1 scripts/gate.sh 9 after the first green run)"
+        fi
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

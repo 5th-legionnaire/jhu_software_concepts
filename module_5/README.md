@@ -21,7 +21,7 @@ This README is a **first pass, written while Module 5 is being built.** The
 build follows [PLAN.md](PLAN.md) in gated phases. Each phase must pass
 `scripts/gate.sh` (tests, 100% coverage, Pylint, secrets scan, Change Register)
 before it is committed, and the [Gate Log](PLAN.md) records each result.
-**Complete as of this commit: Phases 0 to 8** (scaffold and gate tooling;
+**Complete as of this commit: Phases 0 to 8, with Phase 9's workflow committed and awaiting its first green run** (scaffold and gate tooling;
 packaging and the pinned lock; configuration and secrets; SQL composition and
 `LIMIT`; the search endpoint; the least-privilege database; Pylint 10.00/10; the
 dependency graph; Snyk). **Not started:** the CI workflow and the PDF report. Sections below that describe those are marked *pending*.
@@ -527,6 +527,35 @@ rules out the usual escape hatches by name, `test_no_inline_disables` scans
 `src/`, and `test_pylint_scores_ten_with_no_messages` runs Pylint and requires
 `10.00/10` with no message line. `pylint_report.txt` is the committed output.
 
+<a id="chg-19"></a>
+
+### CHG-19: a four-job CI workflow, `ci.yml`
+
+**Problem.** Module 4's workflow ran one job. A single red job does not say which
+requirement broke, and a check that is part of a larger job is the first to be
+loosened when that job is slow.
+
+**Decision.** `.github/workflows/ci.yml` has four jobs that fail independently:
+`lint` (Pylint must score exactly 10.00), `dependency-graph` (pydeps and Graphviz
+must build a valid `dependency.svg`, uploaded as an artifact), `snyk` (every pinned
+package must have no finding at or above high, with Snyk Code report-only), and
+`test` (the full suite with 100% coverage, on pip and on uv, against a
+PostgreSQL 16 service). The test job builds the same two least-privilege roles as
+production, from throwaway random passwords that are masked in the log and turned
+into SCRAM verifiers before they reach the server. Module 4's `tests.yml` is
+untouched and keeps testing `module_4`.
+
+**Trade-off.** Four jobs install the environment four times, so a push costs more
+runner minutes than one job would. The Snyk job is skipped with a notice, not
+failed, when no token is available (a pull request from a fork), so that case is
+not a red mark that means nothing.
+
+**Verified by.** `tests/test_ci_config.py` parses the workflow with PyYAML and
+asserts each requirement by name (`test_four_jobs`, `test_pylint_fail_under_10`,
+`test_svg_validation_step`, and more), and was shown to fail when the lint
+threshold is lowered or the Snyk step is made non-failing. It cannot replace a
+green run, which is the real evidence: see `actions_success.png`.
+
 <a id="chg-21"></a>
 
 ### CHG-21: the role table holds variable names as a pair, not a `"password"` key
@@ -856,6 +885,24 @@ This list mirrors them.
   1 local-count message (CHG-15); 2 `too-few-public-methods` (CHG-17); 1 useless
   return (A6.5). Phase 3 had already removed the f-string line-length hits.
 
+### Phase 9 amendments
+
+- **A9.1 The gate has two stages, because a green run cannot exist before the push.**
+  `scripts/gate.sh 9` first checks everything that can be checked offline: the
+  workflow's tests and the standard gate. The workflow is then committed and pushed.
+  Once the run is green and the screenshot is replaced, `GATE_CI_LIVE=1 scripts/gate.sh 9`
+  requires a successful run of the pushed commit and a screenshot that is no longer
+  Module 4's, and that run is the one recorded in the Gate Log.
+- **A9.2 The Snyk job calls `scripts/snyk_scan.sh`,** not a bare `snyk test`, for the
+  reason in A8.1. It is skipped with a notice when no token is available.
+- **A9.3 The test job needs Graphviz.** One of the tests regenerates `dependency.svg`
+  and compares it with the committed graph, so the runner installs `dot`.
+- **A9.4 No cleartext password reaches `psql` in CI either.** The roles are made from
+  per-run random passwords, masked in the log, converted to SCRAM verifiers, and passed
+  in the environment, the same as the README's Database setup. The only literal is
+  the throwaway superuser password of the ephemeral Postgres service.
+- **A9.5 `actions_success.png` is Josh's** and must show the Module 5 run, not Module 4's.
+
 ### Phase 8 amendments
 
 - **A8.1 Snyk cannot read the universal lock directly.** `requirements.txt` carries
@@ -958,7 +1005,9 @@ the rest name the phase that produces them.
       (Phase 8): screenshots of `scripts/snyk_scan.sh` and `snyk code test src`, with
       `snyk_report.json`, `snyk_code_report.txt`, and the triage in
       [report/snyk_triage.md](report/snyk_triage.md).
-- [ ] **`.github/workflows/ci.yml`** and **`actions_success.png`** (Phase 9).
+- [x] **`.github/workflows/ci.yml`** (Phase 9), four jobs; see [CHG-19](#chg-19).
+- [ ] **`actions_success.png`**: a screenshot of the green `module-5-ci` run. The file
+      in this folder is still Module 4's, and is replaced once the run is green.
 - [ ] **`coverage_summary.txt`**: the committed file is still Module 4's
       (102 tests); it is regenerated in Phase 10.
 - [ ] **`module_5_report.pdf`** (Phase 10).
@@ -988,7 +1037,7 @@ scan run in CI.
 | Pylint 10.00/10 | fixes in code, no inline disables, one classification in `.pylintrc` | `src/`, `pylint_report.txt` | done |
 | Dependency graph | pydeps and Graphviz; every module and package, no import cycles | `dependency.svg`, `report/` | done |
 | Snyk | dependency and code scans, all 70 pinned packages, findings fixed or triaged | `snyk_report.json`, `snyk/`, `report/snyk_triage.md` | done |
-| CI | lint, graph, Snyk, and tests as four jobs | `.github/workflows/ci.yml` | pending |
+| CI | lint, graph, Snyk, and tests as four jobs; pip and uv; two least-privilege roles | `.github/workflows/ci.yml` | done (see the Phase 9 amendments for the run) |
 
 Every change made to the Module 4 code, and why, is recorded in the
 [Change Register](CHANGES.md) and explained under

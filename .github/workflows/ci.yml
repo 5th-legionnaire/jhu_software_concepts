@@ -1,0 +1,178 @@
+# Module 5 CI: four jobs that fail independently, so a red check names the problem.
+#
+#   lint              Pylint must score exactly 10.00 on src/ (the assignment's bar)
+#   dependency-graph  pydeps and Graphviz must build a valid dependency.svg
+#   snyk              the pinned dependencies must have no finding at or above high
+#   test              the full suite, 100% coverage, on pip and on uv, against PostgreSQL
+#                     with the same two least-privilege roles production uses
+#
+# Module 4's workflow (tests.yml) is untouched and keeps testing module_4.
+
+name: module-5-ci
+
+on:
+  push:
+    branches: [main]
+    paths: ["module_5/**", ".github/workflows/ci.yml"]
+  pull_request:
+    paths: ["module_5/**", ".github/workflows/ci.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: module_5
+
+env:
+  # Pinned to the version the project is developed on, so a failure is never a
+  # Python version difference.
+  PYTHON_VERSION: "3.14.6"
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: module_5/requirements.txt
+      - name: Install the pinned environment
+        run: |
+          pip install -r requirements.txt
+          pip install -e . --no-deps
+      - name: Pylint must score 10.00
+        run: pylint --rcfile=.pylintrc --fail-under=10 src
+
+  dependency-graph:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: module_5/requirements.txt
+      - name: Install Graphviz
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+      - name: Install the pinned environment
+        run: |
+          pip install -r requirements.txt
+          pip install -e . --no-deps
+      - name: Generate dependency.svg
+        run: pydeps src/app.py --noshow -T svg -o dependency.svg --max-module-depth=1
+      - name: Validate dependency.svg
+        run: test -s dependency.svg && grep -q "<svg" dependency.svg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dependency-graph
+          path: module_5/dependency.svg
+
+  snyk:
+    runs-on: ubuntu-latest
+    env:
+      SNYK_TOKEN: ${{ secrets.SNYK_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: module_5/requirements.txt
+      - name: Install the pinned environment
+        run: |
+          pip install -r requirements.txt
+          pip install -e . --no-deps
+      - name: Skip with a notice when no token is available (fork pull requests)
+        if: env.SNYK_TOKEN == ''
+        run: echo "::notice::SNYK_TOKEN is not available to this run, so the Snyk scan was skipped."
+      - uses: snyk/actions/setup@master
+        if: env.SNYK_TOKEN != ''
+      - name: Snyk dependency scan (fails on high or critical)
+        if: env.SNYK_TOKEN != ''
+        # scripts/snyk_scan.sh evaluates the lock's environment markers, which Snyk
+        # does not, and scans every pinned package; see README, "Security tooling".
+        run: scripts/snyk_scan.sh --json snyk-ci
+      - name: Snyk Code (report only)
+        if: env.SNYK_TOKEN != '' && always()
+        run: snyk code test src --json-file-output=snyk-ci/code.sarif.json || true
+      - uses: actions/upload-artifact@v4
+        if: env.SNYK_TOKEN != '' && always()
+        with:
+          name: snyk-reports
+          path: module_5/snyk-ci/
+          if-no-files-found: ignore
+
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        installer: [pip, uv]
+
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          # The server's own superuser, used only to bootstrap the two roles below.
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: ci-bootstrap-only
+          POSTGRES_DB: gradcafe_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    env:
+      BOOTSTRAP_URL: postgresql://postgres:ci-bootstrap-only@localhost:5432/postgres
+
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: pip
+          cache-dependency-path: module_5/requirements.txt
+      - name: Install Graphviz (a test regenerates dependency.svg)
+        run: sudo apt-get update && sudo apt-get install -y graphviz
+
+      - name: Install with pip
+        if: matrix.installer == 'pip'
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install -r requirements.txt
+          .venv/bin/pip install -e . --no-deps
+      - uses: astral-sh/setup-uv@v5
+        if: matrix.installer == 'uv'
+      - name: Install with uv
+        if: matrix.installer == 'uv'
+        run: |
+          uv venv -p ${{ env.PYTHON_VERSION }} .venv
+          uv pip sync requirements.txt
+          uv pip install -e . --no-deps
+
+      - name: Create the two database roles from throwaway passwords
+        # Random per run, never written to a file or a log. The roles are made from
+        # SCRAM verifiers, not passwords, exactly as in the README's Database setup.
+        run: |
+          owner_pw="$(openssl rand -hex 16)"; app_pw="$(openssl rand -hex 16)"
+          echo "::add-mask::$owner_pw"; echo "::add-mask::$app_pw"
+          export OWNER_VERIFIER="$(printf %s "$owner_pw" | .venv/bin/python scripts/scram_verifier.py)"
+          export APP_VERIFIER="$(printf %s "$app_pw" | .venv/bin/python scripts/scram_verifier.py)"
+          psql "$BOOTSTRAP_URL" -v db=gradcafe_test -f sql/roles.sql
+          echo "TEST_ADMIN_DATABASE_URL=postgresql+psycopg://gradcafe_owner:${owner_pw}@localhost:5432/gradcafe_test" >> "$GITHUB_ENV"
+          echo "TEST_DATABASE_URL=postgresql+psycopg://gradcafe_app:${app_pw}@localhost:5432/gradcafe_test" >> "$GITHUB_ENV"
+      - name: The owner creates the table, then the app role is granted its two privileges
+        run: |
+          .venv/bin/python -c "
+          import os, load_data
+          connection = load_data.create_connection(load_data.get_db_config(os.environ['TEST_ADMIN_DATABASE_URL']))
+          load_data.create_table(connection)
+          connection.close()"
+          psql "postgresql://postgres:ci-bootstrap-only@localhost:5432/gradcafe_test" -f sql/grants.sql
+
+      - name: Full suite, 100% coverage required
+        run: .venv/bin/python -m pytest

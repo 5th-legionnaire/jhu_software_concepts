@@ -817,6 +817,15 @@ jobs:
 Interpretations: "4 separate actions" means four jobs in one `ci.yml`. The PDF's "pytest fail if
 score is below 10" means fail on any test failure, with the 100% coverage gate on top.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A9.1** Two-stage gate: `gate.sh 9` runs the offline checks before the push; after the first green run and the
+  screenshot, `GATE_CI_LIVE=1 gate.sh 9` requires a successful run of the pushed commit and a screenshot that is
+  not Module 4's, and that run is logged. A green run cannot exist before the push.
+- **A9.2** The Snyk job calls `scripts/snyk_scan.sh` (marker-aware, A8.1) and skips with a notice without a token.
+- **A9.3** The test job installs Graphviz, since a test regenerates `dependency.svg`.
+- **A9.4** CI makes the two roles from masked random passwords via SCRAM verifiers; no cleartext password reaches psql.
+- **A9.5** `actions_success.png` must show the Module 5 run; the file in the folder is Module 4's until replaced.
+
 **Exit:** standard gate plus: `test_ci_config.py` passes. One push yields **all four jobs green**,
 captured in `actions_success.png`. To prove the lint job bites, push a throwaway branch with one lint
 violation and confirm it fails red, then delete the branch.
