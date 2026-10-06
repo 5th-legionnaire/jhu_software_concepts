@@ -108,7 +108,7 @@ pytest-cov==7.0.0
     # via gradcafe-analytics (setup.py)
 pytest-mock==3.15.1
     # via gradcafe-analytics (setup.py)
-python-dotenv==1.0.1
+python-dotenv==1.2.4
     # via gradcafe-analytics (setup.py)
 pyyaml==6.0.3
     # via gradcafe-analytics (setup.py)
@@ -168,7 +168,7 @@ typing-extensions==4.16.0
     #   sqlalchemy
 tzdata==2026.5 ; sys_platform == 'win32'
     # via psycopg
-urllib3==2.7.0
+urllib3==2.8.0
     # via
     #   gradcafe-analytics (setup.py)
     #   requests

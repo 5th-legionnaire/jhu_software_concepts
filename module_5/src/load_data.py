@@ -53,12 +53,14 @@ DB_LOCATION_ENV = {
     "dbname": "DB_NAME",
 }
 
-# Who connects. The runtime account is least-privilege; the owner account does
-# schema setup and the bulk load only (see sql/roles.sql). Keeping them under
-# different variable names means a run cannot silently use the wrong account.
+# Who connects, as the names of the (user, password) environment variables. The
+# runtime account is least-privilege; the owner account does schema setup and
+# the bulk load only (see sql/roles.sql). Keeping them under different variable
+# names means a run cannot silently use the wrong account. These are variable
+# names, not credentials.
 ROLE_ENV = {
-    "app": {"user": "DB_USER", "password": "DB_PASSWORD"},
-    "owner": {"user": "DB_OWNER_USER", "password": "DB_OWNER_PASSWORD"},
+    "app": ("DB_USER", "DB_PASSWORD"),
+    "owner": ("DB_OWNER_USER", "DB_OWNER_PASSWORD"),
 }
 
 
@@ -127,7 +129,8 @@ def get_db_config(database_url=None, role="app"):
     url = database_url or os.environ.get("DATABASE_URL")
     if url:
         return _config_from_url(url)
-    names = {**DB_LOCATION_ENV, **ROLE_ENV[role]}
+    user_variable, password_variable = ROLE_ENV[role]
+    names = {**DB_LOCATION_ENV, "user": user_variable, "password": password_variable}
     return {key: _require(name) for key, name in names.items()}
 
 

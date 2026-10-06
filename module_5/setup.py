@@ -38,8 +38,9 @@ RUNTIME = [
     # reads. The assignment specifies SQLAlchemy 2.x.
     "SQLAlchemy~=2.0",
     # Loads the DB_* connection settings from .env (gitignored) instead of
-    # hardcoding them.
-    "python-dotenv~=1.0",
+    # hardcoding them. 1.2.2 or later: 1.0.1 has a symlink-following flaw when
+    # it rewrites a .env file (SNYK-PYTHON-PYTHONDOTENV-16115271).
+    "python-dotenv~=1.2",
     # HTML parsing for the saved result pages (clean.py), carried over from
     # Module 2. Also used by the tests to assert against the rendered page.
     "beautifulsoup4~=4.15",
@@ -48,7 +49,11 @@ RUNTIME = [
     # launches a browser: pull_data.py takes its driver as an injected argument.
     "selenium~=4.49",
     # HTTP client pulled in by Selenium, listed because the assignment names it.
-    "urllib3~=2.7",
+    # 2.8.0 or later: 2.7.0 has two high-severity flaws (improper certificate
+    # validation, SNYK-PYTHON-URLLIB3-20302844, and unbounded resource
+    # allocation, SNYK-PYTHON-URLLIB3-20302846) and an infinite loop
+    # (SNYK-PYTHON-URLLIB3-20302845), all fixed in 2.8.0.
+    "urllib3~=2.8",
 ]
 
 DEV = [

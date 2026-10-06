@@ -379,6 +379,34 @@ connection.close()
             || fail G9 "the final pydeps flags are not recorded in the README and the summary"
         ok G9 "the flags are recorded in the README and the summary"
         ;;
+    8)
+        # The scan, run live now: every pinned package, nothing at or above "high".
+        command -v snyk >/dev/null && snyk whoami --experimental >/dev/null 2>&1 \
+            || fail G9 "snyk is not installed or not signed in (snyk auth)"
+        scripts/snyk_scan.sh >"$GATE_DIR/phase-8-snyk.log" 2>&1 \
+            || fail G9 "snyk found an issue at or above high, or could not scan; see .gate/phase-8-snyk.log"
+        grep -q "no vulnerable paths found" "$GATE_DIR/phase-8-snyk.log" \
+            || fail G9 "the Snyk run did not report a clean result"
+        ok G9 "a live Snyk scan of all 70 pinned packages finds nothing at or above high"
+
+        # The committed evidence agrees, and the screenshots are real PNGs.
+        "$PY" -c "
+import json
+for name in ('snyk_report.json', 'snyk/excluded.json'):
+    d = json.load(open(name))
+    assert d['ok'] is True and d['vulnerabilities'] == [], name
+before = json.load(open('snyk/before_upgrade_applies.json'))
+assert before['vulnerabilities'], 'the before-upgrade record is empty'
+" || fail G9 "the committed Snyk evidence is not a clean result with a before record"
+        local png
+        for png in snyk-analysis.png snyk-code-analysis.png; do
+            [ "$(head -c 8 "$png" 2>/dev/null | od -An -tx1 | tr -d ' ')" = "89504e470d0a1a0a" ] \
+                || fail G9 "$png is missing or is not a PNG (a screenshot of the scan)"
+        done
+        ok G9 "evidence committed: clean report, before-upgrade record, both screenshots"
+        [ -s report/snyk_triage.md ] && [ -s snyk_code_report.txt ] || fail G9 "the triage or the Snyk Code report is missing"
+        ok G9 "triage table and Snyk Code report present"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

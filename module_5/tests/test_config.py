@@ -201,7 +201,7 @@ def _example_names():
 
 
 def test_env_example_lists_every_variable_the_code_reads():
-    read = {name for env in ld.ROLE_ENV.values() for name in env.values()}
+    read = {name for pair in ld.ROLE_ENV.values() for name in pair}
     read |= set(ld.DB_LOCATION_ENV.values()) | {"DATABASE_URL", "TEST_DATABASE_URL",
                                                "TEST_ADMIN_DATABASE_URL"}
     assert _example_names() == read
@@ -259,3 +259,27 @@ def test_successful_connection_logs_no_error(monkeypatch, caplog, capsys):
         assert ld.create_connection(CONFIG) == "connection"
     assert caplog.records == []
     assert "Connection to PostgreSQL DB successful" in capsys.readouterr().out
+
+
+# --- the role table is variable names, never credentials (CHG-21) -------------
+
+def test_role_env_maps_each_role_to_a_user_and_password_variable():
+    assert ld.ROLE_ENV == {"app": ("DB_USER", "DB_PASSWORD"),
+                           "owner": ("DB_OWNER_USER", "DB_OWNER_PASSWORD")}
+    for user_variable, password_variable in ld.ROLE_ENV.values():
+        assert user_variable.endswith("USER") and password_variable.endswith("PASSWORD")
+
+
+def test_no_password_key_holds_a_string_literal_in_src():
+    """What Snyk Code's NoHardcodedPasswords rule looks for, checked here so it cannot return."""
+    offenders = []
+    for path in sorted(SRC.glob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if isinstance(node, ast.Dict):
+                for key, value in zip(node.keys, node.values):
+                    if (isinstance(key, ast.Constant) and isinstance(key.value, str)
+                            and "password" in key.value.lower()
+                            and isinstance(value, ast.Constant) and isinstance(value.value, str)
+                            and value.value):
+                        offenders.append(f"{path.name}:{node.lineno}")
+    assert offenders == []

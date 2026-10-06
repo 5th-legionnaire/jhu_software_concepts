@@ -21,10 +21,10 @@ This README is a **first pass, written while Module 5 is being built.** The
 build follows [PLAN.md](PLAN.md) in gated phases. Each phase must pass
 `scripts/gate.sh` (tests, 100% coverage, Pylint, secrets scan, Change Register)
 before it is committed, and the [Gate Log](PLAN.md) records each result.
-**Complete as of this commit: Phases 0 to 7** (scaffold and gate tooling;
+**Complete as of this commit: Phases 0 to 8** (scaffold and gate tooling;
 packaging and the pinned lock; configuration and secrets; SQL composition and
 `LIMIT`; the search endpoint; the least-privilege database; Pylint 10.00/10; the
-dependency graph). **Not started:** Snyk, the CI workflow, and the PDF report. Sections below that describe those are marked *pending*.
+dependency graph; Snyk). **Not started:** the CI workflow and the PDF report. Sections below that describe those are marked *pending*.
 The sections from "Architecture" onward still describe the Module 4 baseline
 and are brought up to date in Phase 10.
 
@@ -527,6 +527,27 @@ rules out the usual escape hatches by name, `test_no_inline_disables` scans
 `src/`, and `test_pylint_scores_ten_with_no_messages` runs Pylint and requires
 `10.00/10` with no message line. `pylint_report.txt` is the committed output.
 
+<a id="chg-21"></a>
+
+### CHG-21: the role table holds variable names as a pair, not a `"password"` key
+
+**Problem.** Snyk Code flagged `{"user": "DB_USER", "password": "DB_PASSWORD"}` as a
+hardcoded password. It was a false positive: the string is the *name* of an
+environment variable. But the shape invited the misreading, for a scanner and
+for a person skimming the code.
+
+**Decision.** `ROLE_ENV` maps each role to a `(user variable, password variable)`
+pair. Nothing in `src/` now has a `"password"` key holding a string literal, and a
+test checks that.
+
+**Trade-off.** None in behavior. The table is slightly less self-describing than a
+dict, and the comment above it says what the two positions are.
+
+**Verified by.** `tests/test_config.py::test_role_env_maps_each_role_to_a_user_and_password_variable`,
+`::test_no_password_key_holds_a_string_literal_in_src` (an AST check of the pattern
+Snyk's rule looks for, shown to fail when one is added), and the existing
+`::test_env_example_lists_every_variable_the_code_reads`.
+
 <a id="chg-18"></a>
 
 ### CHG-18: The whole suite runs, and an unmarked test stops it
@@ -835,6 +856,51 @@ This list mirrors them.
   1 local-count message (CHG-15); 2 `too-few-public-methods` (CHG-17); 1 useless
   return (A6.5). Phase 3 had already removed the f-string line-length hits.
 
+### Phase 8 amendments
+
+- **A8.1 Snyk cannot read the universal lock directly.** `requirements.txt` carries
+  environment markers (`colorama==0.4.6 ; sys_platform == 'win32'`) so one file
+  serves macOS, Linux, and Windows. Snyk inspects the installed environment and
+  does not evaluate markers, so `snyk test --file=requirements.txt` stops with
+  "Missing required packages" for `cffi`, `greenlet` and `pycparser`, which are
+  correctly not installed on this machine. `--skip-unresolved` does not cover it.
+  The lock is right and the scanner has a limit.
+- **A8.2 The scan evaluates the markers itself and loses no package.**
+  `scripts/snyk_requirements.py` applies each marker with the `packaging` library
+  pip uses and writes two marker-free files: the 65 pins that apply here, and the 5
+  a marker excludes (`cffi`, `colorama`, `greenlet`, `pycparser`, `tzdata`).
+  `scripts/snyk_scan.sh` scans the first in the project environment and the second
+  in a scratch environment that installs just those pins. All 70 are scanned, and a
+  test fails if the two groups ever stop covering the lock.
+- **A8.3 Two packages were upgraded, and the suite re-run.** `urllib3` 2.7.0 to
+  2.8.0 (two high, one medium) and `python-dotenv` 1.0.1 to 1.2.4 (one medium). Both
+  were already allowed by the compatible-release ranges, so `setup.py` raised the
+  floors to force the fix and the lock was regenerated: exactly two lines changed.
+  All 563 tests passed on the new versions, and the gate was re-run.
+- **A8.4 Snyk Code's two findings were triaged, not silenced.** The password
+  warning was a false positive that is now removed from the code (CHG-21). The
+  Low path-traversal note is an accepted risk: the path is a command-line argument
+  chosen by the person running the tool. The reasoning is in
+  `report/snyk_triage.md`.
+- **A8.5 The CI Snyk step needs the same two-group scan.** Phase 9 calls
+  `scripts/snyk_scan.sh` rather than a bare `snyk test`, for the reason in A8.1.
+- **A8.6 The `llm_hosting/` scan was not done.** The plan marked it informational
+  and eligible to cut under the time limit. `llm_hosting/requirements.txt` is a
+  separate, instructor-provided environment that is not part of the submitted
+  application.
+- **A8.7 Screenshots are Josh's, and were checked.** `snyk-analysis.png` and
+  `snyk-code-analysis.png` are screenshots of the two commands, which only a
+  terminal on his machine can produce. Each was compared with the committed
+  evidence: both dependency groups report no vulnerable paths (65 and 5
+  packages), and Snyk Code shows one open LOW finding at `load_data.py` line 398.
+- **A8.8 Two explanatory sections were added at Josh's request.** "Upgrading
+  dependencies when a vulnerability is known" records what was found and why a
+  fixed version is taken and not argued around. "False positives: refactor the
+  code, even when you know it is safe" records why code is reshaped to avoid a known
+  false positive (recurring investigation, alert fatigue, hidden suppressions,
+  ambiguity for people) and where that stops, with the path-traversal note as the
+  counterexample.
+
 ### Phase 7 amendments
 
 - **A7.1 The graph is collapsed to one node per package.** The plan's default,
@@ -888,8 +954,10 @@ the rest name the phase that produces them.
       The command is documented under [Security tooling](#security-tooling).
 - [x] **`dependency.svg`** (Phase 7): built with pydeps and Graphviz, with the
       7-sentence explanation in [report/dependency_summary.md](report/dependency_summary.md).
-- [ ] **`snyk-analysis.png`**, and for extra credit `snyk-code-analysis.png`
-      (Phase 8).
+- [x] **`snyk-analysis.png`**, and for extra credit **`snyk-code-analysis.png`**
+      (Phase 8): screenshots of `scripts/snyk_scan.sh` and `snyk code test src`, with
+      `snyk_report.json`, `snyk_code_report.txt`, and the triage in
+      [report/snyk_triage.md](report/snyk_triage.md).
 - [ ] **`.github/workflows/ci.yml`** and **`actions_success.png`** (Phase 9).
 - [ ] **`coverage_summary.txt`**: the committed file is still Module 4's
       (102 tests); it is regenerated in Phase 10.
@@ -919,7 +987,7 @@ scan run in CI.
 | Least privilege | owner and runtime roles, `SELECT` and `INSERT` only | `sql/` | done |
 | Pylint 10.00/10 | fixes in code, no inline disables, one classification in `.pylintrc` | `src/`, `pylint_report.txt` | done |
 | Dependency graph | pydeps and Graphviz; every module and package, no import cycles | `dependency.svg`, `report/` | done |
-| Snyk | dependency and code scans | `snyk-analysis.png` | pending |
+| Snyk | dependency and code scans, all 70 pinned packages, findings fixed or triaged | `snyk_report.json`, `snyk/`, `report/snyk_triage.md` | done |
 | CI | lint, graph, Snyk, and tests as four jobs | `.github/workflows/ci.yml` | pending |
 
 Every change made to the Module 4 code, and why, is recorded in the
@@ -962,6 +1030,10 @@ module_5/
 ├── scripts/                    gate.sh, change-register and secrets checks,
 │                               lock regeneration, fresh-install check
 ├── dependency.svg              the import graph, from pydeps and Graphviz
+├── snyk_report.json            Snyk dependency scan, after remediation
+├── snyk_code_report.txt        Snyk Code scan, after remediation
+├── snyk/                       the scans before the fixes, and the marker-excluded packages
+├── snyk-analysis.png, snyk-code-analysis.png   screenshots of both scans
 ├── report/                     report source: the graph explanation (more in Phase 10)
 ├── docs/                       Sphinx project
 ├── data/                       bulk JSON input, never imported
@@ -980,7 +1052,7 @@ resolve through the editable install of `setup.py` (see
 [CHG-01](#chg-01)); `src/` is deliberately not a package, because converting it
 would break parity with Module 3, where these files sat at the top level.
 
-Not yet present, and produced in later phases: `snyk-analysis.png`,
+Not yet present, and produced in later phases:
 `actions_success.png`, `module_5_report.pdf`, and
 `../.github/workflows/ci.yml`.
 
@@ -1271,8 +1343,8 @@ active.
 | --- | --- | --- | --- |
 | Pylint | `pylint --rcfile=.pylintrc --fail-under=10 src` | must print `rated at 10.00/10` with no message lines | **10.00/10**, committed as `pylint_report.txt` (Phase 6) |
 | pydeps | `pydeps src/app.py --noshow -T svg -o dependency.svg --max-module-depth=1` | needs Graphviz's `dot` on the path; arrows point from an imported module to its importer | done: [dependency.svg](dependency.svg), explained in [report/dependency_summary.md](report/dependency_summary.md) |
-| Snyk, dependencies | `snyk test --file=requirements.txt --package-manager=pip --command=python` | lists known vulnerabilities in the pinned packages | pending (Phase 8) |
-| Snyk Code | `snyk code test` | static analysis of `src/` (extra credit) | pending (Phase 8) |
+| Snyk, dependencies | `scripts/snyk_scan.sh` (it runs `snyk test --file=requirements.txt --package-manager=pip --command=python` on the pinned lock; see below) | lists known vulnerabilities in the pinned packages; `✔ no vulnerable paths found` is clean | done: 22 findings fixed, 0 remain |
+| Snyk Code | `snyk code test src` | static analysis of `src/` (extra credit) | done: 1 LOW accepted, see the triage |
 
 Pylint is run on `src/` only, as the assignment requires, and the project
 carries no inline `# pylint: disable`; findings are fixed in the code. The one
@@ -1283,6 +1355,88 @@ Two scripts guard the repository itself: `scripts/check_secrets.py` fails if a
 credential-shaped literal appears in `src/` or `tests/`, and
 `scripts/gate.sh` runs the checks above together with the tests before a phase
 may be committed.
+
+### Upgrading dependencies when a vulnerability is known
+
+A pinned lock is a snapshot of what was true on the day it was generated. Pinning
+is what makes an environment reproducible, and it also freezes whatever flaws that
+version has, because advisories are published *after* a release. A lock that was
+clean when it was written is not clean forever, which is why the scan is run
+against the lock, repeatedly, and not once.
+
+**What the scan found here.** 22 entries, which are 4 distinct issues in 2 of the 70
+pinned packages. Snyk lists one entry per dependency path, so `urllib3`'s three
+issues appear 21 times.
+
+| Package | Issue | Severity | Why it matters here |
+| --- | --- | --- | --- |
+| `urllib3` 2.7.0 | Improper Certificate Validation | High | A client could accept a certificate it should reject, which is what lets a machine in the middle impersonate a server |
+| `urllib3` 2.7.0 | Allocation of Resources Without Limits or Throttling | High | A hostile response can exhaust memory or CPU, a denial of service |
+| `urllib3` 2.7.0 | Infinite loop | Medium | A request can hang a process |
+| `python-dotenv` 1.0.1 | Symlink Attack | Medium | Rewriting a `.env` file can be redirected through a symlink to another file |
+
+**What was done, and why it was the right call.** `urllib3` went to 2.8.0 and
+`python-dotenv` to 1.2.4, and exactly two lines of the lock changed. Both versions
+were already permitted by the compatible-release ranges in `setup.py`, so a
+plain reinstall would not have taken them: a lock does not move on its own. The
+floors were raised (`urllib3~=2.8`, `python-dotenv~=1.2`) so that regenerating the
+lock can never go backward, and a test, `test_remediated_versions_stay_remediated`,
+fails if it does. The full suite was then re-run on the new versions, because a
+dependency bump is a code change that the tests, not the version number, vouch for.
+It passed, and Snyk now reports no findings in any of the 70 packages.
+
+**Why upgrade instead of arguing the flaw is unreachable.** The honest reachability
+analysis for each of these is short and not reassuring. `urllib3` is the HTTP client
+under Selenium, so it carries the project's browser traffic. `python-dotenv` is
+only read here, so its flaw is out of reach, but that conclusion depends on nobody
+ever calling its write functions. Deciding whether an advisory applies costs more
+than the fix, and is wrong in the direction that matters when it is wrong. A patch
+in a version range already allowed costs minutes, and the cost of deferring it grows
+with every release that lands on top of it, because the eventual jump gets larger
+and riskier. So the rule used here is: when a fixed version exists, take it, prove
+it with the tests, and record what was found.
+
+### False positives: refactor the code, even when you know it is safe
+
+Not everything a tool reports is a defect, and this module met several. Pylint's
+type inference could not see through `sqlalchemy.func`, so every `func.count()`
+reported "not callable", and it read `sessionmaker[Session]` as subscripting
+something that is not subscriptable (23 messages in all, CHG-16). Snyk Code
+flagged `{"user": "DB_USER", "password": "DB_PASSWORD"}` as a hardcoded password,
+when the string is the *name* of an environment variable (CHG-21). This project's
+own secrets scanner had the same trouble with the same line. None of these was a
+vulnerability, and in each case the code was changed anyway. The reasons are the
+point:
+
+- **The investigation recurs; the fix happens once.** Each time a scan runs, a
+  reviewer, a teammate, or the same author six months later must re-read the
+  finding, re-trace the code, and re-conclude "false positive". That cost is paid on
+  every run, for as long as the code exists. Reshaping the code once removes the
+  recurring cost, and reshaping it with a test that encodes the pattern (here, an
+  AST check that no `"password"` key holds a string literal) means it cannot come
+  back unnoticed.
+- **A standing red result stops being read.** A scan with a known, accepted finding
+  trains everyone to look past red. A clean baseline means a new finding is news, and
+  that signal is worth more than the finding was.
+- **Suppression hides more than the finding.** An inline `# pylint: disable` or a
+  scanner ignore rule silences the line for every future reason as well. A real
+  problem that later appears on that line is invisible. That is why this project has
+  zero inline disables and a test that fails if one is added (decision D6).
+- **If a tool can misread it, so can a person.** A dict that pairs the key
+  `"password"` with a string literal does look like a credential at a glance. A pair
+  of variable names, `("DB_USER", "DB_PASSWORD")`, says what the code means. The
+  refactor was a small clarity improvement as well as a way to quiet a scanner.
+
+**The limit, so this is not mistaken for appeasing tools.** The change must be
+behavior-neutral, tested, and an improvement or at worst neutral for the reader. The
+same scan raised a LOW path-traversal note on `python3 src/load_data.py <file>`,
+and that was *not* refactored away. The path is chosen by the person running the
+tool on their own machine, so there is no attacker to defend against, and adding a
+meaningless check would be security theater: code that exists to satisfy a scanner,
+costs the reader something, and gives false assurance. That finding is documented
+as an accepted risk, with the reasoning, in `report/snyk_triage.md`. The test for
+whether to change the code is whether the result is better code, not whether the
+tool goes quiet.
 
 ## Architecture
 

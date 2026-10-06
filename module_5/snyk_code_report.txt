@@ -1,0 +1,29 @@
+
+Testing src ...
+
+Open Issues
+
+ ✗ [LOW] Path Traversal
+   Finding ID: 4fdfb12d-f267-411f-b40c-a0d63a2bd450
+   Path: load_data.py, line 398
+   Info: Unsanitized input from a command line argument flows into open, where it is used as a path. This may result in a Path Traversal vulnerability and allow an attacker to read arbitrary files.
+
+
+
+╭────────────────────────────────────────────────────╮
+│ Test Summary                                       │
+│                                                    │
+│   Organization:      5th-legionnaire               │
+│   Test type:         Static code analysis          │
+│   Project path:      src                           │
+│                                                    │
+│   Total issues:   1                                │
+│   Ignored issues: 0 [ 0 HIGH  0 MEDIUM  0 LOW ]    │
+│   Open issues:    1 [ 0 HIGH  0 MEDIUM  1 LOW ]    │
+╰────────────────────────────────────────────────────╯
+    
+💡 Tip
+
+   To view ignored issues, use the --include-ignores option.
+                                                            
+

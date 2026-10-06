@@ -751,6 +751,29 @@ draft is stored in `report/` for Phase 10.
 **Exit:** standard gate plus: zero high or critical findings in `snyk test`, or each one justified in
 writing. Both screenshots committed. A triage table is drafted for the report.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A8.1** Snyk cannot read the universal lock directly: it does not evaluate environment markers, so
+  `cffi`, `greenlet` and `pycparser` are reported "missing" (correctly absent on this machine).
+  `--skip-unresolved` does not cover it.
+- **A8.2** `scripts/snyk_requirements.py` evaluates the markers and splits the lock into the 65 pins that
+  apply and the 5 a marker excludes; `scripts/snyk_scan.sh` scans the first in the project environment and
+  the second in a scratch environment. All 70 pinned packages are scanned; a test fails if the groups stop
+  covering the lock.
+- **A8.3** Findings: 22 entries, 4 distinct issues in 2 packages (`urllib3` 2.7.0: 2 high and 1 medium;
+  `python-dotenv` 1.0.1: 1 medium). Fixed by `urllib3~=2.8` and `python-dotenv~=1.2` (lock: 2.8.0 and
+  1.2.4), exactly two lock lines changed; 563 tests pass on the new versions. After: 0 findings in either group.
+- **A8.4** Snyk Code: 2 findings. NoHardcodedPasswords was a false positive (an env var *name*) and is removed
+  in code (CHG-21, with a test); the LOW path-traversal on `sys.argv[1]` is an accepted risk, reasoned in
+  `report/snyk_triage.md`.
+- **A8.5** Phase 9's Snyk job calls `scripts/snyk_scan.sh`, not a bare `snyk test`, for A8.1.
+- **A8.6** The `llm_hosting/` informational scan was cut (time limit; separate instructor environment).
+- **A8.7** The two screenshots are Josh's, and were checked against the committed evidence (65 and 5 packages
+  clean; one open LOW finding at `load_data.py` line 398).
+- **A8.8** README sections added at Josh's request: why a known-vulnerable dependency is upgraded (what was found:
+  `urllib3` 2.7.0 and `python-dotenv` 1.0.1) and why code is refactored to avoid a known false positive (the
+  investigation recurs, a standing red result stops being read, suppression hides more than the finding, and a tool
+  that can misread code can mislead a person), with the limit: do not add code only to satisfy a scanner.
+
 ### Phase 9: GitHub Actions CI (CHG-19)
 
 **Entry:** standard. `SNYK_TOKEN` secret present. Local gate green at Phase 8.
