@@ -64,7 +64,8 @@ This list mirrors them.
 
 - **A0.1 Entry state.** The copy (task 1) had already been made in commit
   `19a3d0f`, and the v2 plan was an uncommitted edit, so check E2 (clean tree)
-  did not hold at entry. The plan is committed with Phase 0. The copied
+  did not hold at entry. Josh committed the plan as `5b2b2b0` during
+  Phase 0. The copied
   `.venv`, `pull_work/`, `__pycache__/`, and `.coverage` were untracked
   duplicates of Module 4's. They were deleted, and the venv was rebuilt,
   because its scripts still pointed at `module_4/.venv`.

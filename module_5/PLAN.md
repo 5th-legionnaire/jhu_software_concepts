@@ -296,7 +296,7 @@ module_5/
 
 **Amendments** (mirrored in README "Changes to the plan")
 - **A0.1** E2 did not hold at entry: task 1 was already done in `19a3d0f`, and this v2 plan was an
-  uncommitted edit. The plan is committed with Phase 0. The copied `.venv`, `pull_work/`, `__pycache__/`,
+  uncommitted edit at entry. Josh committed it as `5b2b2b0` during Phase 0. The copied `.venv`, `pull_work/`, `__pycache__/`,
   and `.coverage` were deleted, and the venv was rebuilt, since its scripts pointed at `module_4/.venv`.
   `PLAN.md` was already in `module_5/`.
 - **A0.2** The measured baseline is **8.30/10 with 52 messages** (20 E1102, not 19), on the same
