@@ -30,6 +30,7 @@ import models
 import orm_queries as oq
 import pull_data
 import query_data as qd
+from spies import SpyConnection, SpyCursor
 
 pytestmark = pytest.mark.security
 
@@ -119,43 +120,6 @@ def test_guard_accepts_composition_and_ordinary_strings(source):
 
 # --- the runtime guard: what reaches the driver -----------------------------
 
-class SpyCursor:
-    """Records the statement of every execute and executemany, then delegates."""
-
-    def __init__(self, inner, seen):
-        self._inner, self._seen = inner, seen
-
-    def execute(self, query, params=None, **kwargs):
-        self._seen.append(query)
-        return self._inner.execute(query, params, **kwargs)
-
-    def executemany(self, query, params_seq, **kwargs):
-        self._seen.append(query)
-        return self._inner.executemany(query, params_seq, **kwargs)
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc_info):
-        return self._inner.__exit__(*exc_info)
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
-
-
-class SpyConnection:
-    """A connection whose cursors are spies."""
-
-    def __init__(self, inner, seen):
-        self._inner, self._seen = inner, seen
-
-    def cursor(self, *args, **kwargs):
-        return SpyCursor(self._inner.cursor(*args, **kwargs), self._seen)
-
-    def __getattr__(self, name):
-        return getattr(self._inner, name)
-
-
 def non_composable(seen):
     """The recorded statements that are not psycopg Composables."""
     return [type(statement).__name__ for statement in seen
@@ -164,8 +128,17 @@ def non_composable(seen):
 
 @pytest.fixture
 def spy_connection(clean_db, db_url):
-    """A real connection to the disposable database, wrapped in a spy, and its record."""
+    """A real connection as the runtime role, wrapped in a spy, and its record."""
     connection = ld.create_connection(ld.get_db_config(db_url))
+    seen = []
+    yield SpyConnection(connection, seen), seen
+    connection.close()
+
+
+@pytest.fixture
+def spy_owner_connection(clean_db, admin_url):
+    """The same, as the owner role, for the statements only the owner may run (DDL)."""
+    connection = ld.create_connection(ld.get_db_config(admin_url))
     seen = []
     yield SpyConnection(connection, seen), seen
     connection.close()
@@ -216,8 +189,8 @@ def test_search_applicants_executes_a_composable(spy_connection):
 
 
 @pytest.mark.db
-def test_create_table_and_count_receive_composables(spy_connection):
-    connection, seen = spy_connection
+def test_create_table_and_count_receive_composables(spy_owner_connection):
+    connection, seen = spy_owner_connection
     ld.create_table(connection)
     ld._count_rows(connection)
     assert seen and non_composable(seen) == []

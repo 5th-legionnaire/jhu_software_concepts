@@ -40,12 +40,14 @@ import time
 import traceback
 from datetime import date, timedelta
 
+import psycopg
+
 from sqlalchemy import func, select
 
 import clean
 import scrape
 from db_safety import clamp_limit
-from load_data import create_connection, create_table, get_db_config, insert_records
+from load_data import create_connection, get_db_config, insert_records
 from models import Applicant, get_session
 
 # The working directory, the bulk JSON, and the LLM standardizer all live in
@@ -271,9 +273,10 @@ def scrape_new_records(session_factory=None, browser_factory=None, standardize=N
 def load_records(records, connect=None):
     """Insert records into PostgreSQL in one transaction.
 
-    This is the default loader create_app() injects. create_table() runs first
-    and is a no-op on an existing table, so a pull against a fresh database
-    does not require load_data.py to have been run.
+    This is the default loader create_app() injects. It issues no DDL (CHG-11):
+    the runtime account may only SELECT and INSERT, so the table must already
+    exist, created by the owner with ``python3 src/load_data.py``. Schema
+    changes are a deployment step, not something a request does.
 
     Args:
         records: standardized applicant records.
@@ -283,7 +286,9 @@ def load_records(records, connect=None):
         int: rows newly inserted; 0 when every record was already present.
 
     Raises:
-        PullError: when the database could not be reached. Nothing was written.
+        PullError: when the database could not be reached, or the table is
+            missing or the account lacks a privilege it needs (the schema was
+            never set up, or the grants were never applied). Nothing was written.
     """
     if not records:
         return 0
@@ -293,8 +298,15 @@ def load_records(records, connect=None):
     if connection is None:
         raise PullError("The database could not be reached. No entries were added.")
     try:
-        create_table(connection)
         return insert_records(connection, records)
+    except (psycopg.errors.InsufficientPrivilege, psycopg.errors.UndefinedTable) as refused:
+        # A missing table is "does not exist", not "permission denied", because
+        # the account cannot see what it has no privilege on to tell the two apart.
+        raise PullError(
+            "The database account is not allowed to add entries, or the applicants "
+            "table does not exist. Ask the database owner to run "
+            "`python3 src/load_data.py` and apply sql/grants.sql. "
+            "No entries were added.") from refused
     finally:
         connection.close()
 

@@ -21,10 +21,9 @@ This README is a **first pass, written while Module 5 is being built.** The
 build follows [PLAN.md](PLAN.md) in gated phases. Each phase must pass
 `scripts/gate.sh` (tests, 100% coverage, Pylint, secrets scan, Change Register)
 before it is committed, and the [Gate Log](PLAN.md) records each result.
-**Complete as of this commit: Phases 0 to 4** (scaffold and gate tooling;
+**Complete as of this commit: Phases 0 to 5** (scaffold and gate tooling;
 packaging and the pinned lock; configuration and secrets; SQL composition and
-`LIMIT`; the search endpoint). **Not started:** the least-privilege
-database role, Pylint 10.00/10, the dependency graph, Snyk, the CI workflow,
+`LIMIT`; the search endpoint; the least-privilege database). **Not started:** Pylint 10.00/10, the dependency graph, Snyk, the CI workflow,
 and the PDF report. Sections below that describe those are marked *pending*.
 The sections from "Architecture" onward still describe the Module 4 baseline
 and are brought up to date in Phase 10.
@@ -324,6 +323,85 @@ a `Services(...)`. `create_app()` with no arguments, which is how
 **Verified by.** `tests/test_flask_page.py::test_services_default_to_real_implementations`,
 `::test_services_override_is_used`, `::test_services_is_frozen_and_every_field_is_optional`.
 
+<a id="chg-11"></a>
+
+### CHG-11: Pull Data no longer creates the table
+
+**Problem.** `pull_data.load_records()` called `create_table()` on every pull,
+so it could work on a fresh database. `CREATE TABLE IF NOT EXISTS` is checked
+against the account's `CREATE` privilege on the schema before it looks at
+whether the table exists, and `COMMENT ON` needs ownership. A least-privilege
+runtime account could do neither, so Pull Data would have failed.
+
+**Decision.** The pull issues no DDL. Creating the schema is the owner's job,
+done once with `python3 src/load_data.py`, which now connects as the owner
+role. If the table is missing or the grants were never applied, the pull stops
+with a plain message that points at `sql/grants.sql`, and the driver's own text
+is not shown.
+
+**Trade-off.** A pull against a database nobody has set up now fails instead of
+quietly creating it. Schema changes are a deployment step, not something a web
+request should be able to do.
+
+**Verified by.** `tests/test_least_privilege.py`: `test_pull_succeeds_as_app_role`
+and `test_pull_route_succeeds_end_to_end_as_app_role` show the minimum is also
+sufficient; `test_load_records_issues_no_ddl` wraps the connection in a spy and
+shows every statement is a `SELECT` or an `INSERT`. `tests/test_pull_pipeline.py`
+covers the privilege-error message.
+
+<a id="chg-12"></a>
+
+### CHG-12: two database roles, with the privileges written down
+
+**Problem.** Module 4 ran as a superuser. Any injection, or any bug, would have
+had the whole server: it could drop the table, read other databases, or create
+roles.
+
+**Decision.** `sql/roles.sql` creates `gradcafe_owner`, which owns the table
+and does schema setup and the bulk load, and `gradcafe_app`, which the running
+app and Pull Data use. Neither is a superuser, and neither can create databases
+or roles, replicate, or bypass row security. Only those two accounts, and
+superusers, can connect to the database. `sql/grants.sql` gives `gradcafe_app`
+`SELECT` and `INSERT` on `applicants` and nothing else: `SELECT` serves the page,
+the search, and the pull's read of the newest entry, and `INSERT` serves Pull
+Data (`ON CONFLICT DO NOTHING` needs no `UPDATE`). There is no `UPDATE`,
+`DELETE`, `TRUNCATE`, `REFERENCES` or `TRIGGER`, no sequence grant, and no
+`ALTER DEFAULT PRIVILEGES`. `sql/migrate_ownership.sql` moves an existing table
+under the owner. All three scripts can be run again safely.
+
+**Trade-off.** The worst the runtime account can do is read the public
+applicant rows and add more of them. That is the point, and it is also a real
+limit: it cannot correct or remove a bad row, so that takes the owner.
+
+**Verified by.** `tests/test_least_privilege.py`, connected as the real
+accounts: `test_role_attributes`, `test_table_privileges` for each privilege,
+`test_ddl_denied` for ten statements (`DROP`, `ALTER`, `CREATE TABLE`,
+`TRUNCATE`, `COMMENT`, `UPDATE`, `DELETE`, `CREATE ROLE`, `CREATE DATABASE`,
+`GRANT`), each raising `InsufficientPrivilege`, and a check that PUBLIC holds
+no privilege on the table.
+
+<a id="chg-13"></a>
+
+### CHG-13: the test fixtures connect as the owner, the application as the app role
+
+**Problem.** Tests that run as a superuser prove nothing about least privilege:
+they would pass even if the app role were useless. But the fixtures have to
+create the schema and `TRUNCATE`, which the app role must not be able to do.
+
+**Decision.** Two test URLs. `TEST_DATABASE_URL` names the runtime account and
+is what every application test connects as. `TEST_ADMIN_DATABASE_URL` names the
+owner, and only the fixtures and the least-privilege tests use it. Neither has
+a default. `TEST_DATABASE_URL` was introduced in Phase 2 (A2.3); this phase adds
+the admin URL and the split.
+
+**Trade-off.** A db test now needs two URLs and two roles set up, not one
+connection string. The setup is documented under
+[Database setup](#database-setup), and the CI workflow does it.
+
+**Verified by.** `tests/test_least_privilege.py::test_app_fixture_connects_as_app_role`
+asks the database who it is connected as, so a harness that silently ran as a
+superuser would fail.
+
 <a id="chg-18"></a>
 
 ### CHG-18: The whole suite runs, and an unmarked test stops it
@@ -545,6 +623,59 @@ This list mirrors them.
   `search_applicants` hands the driver a composable, and the limit check covers
   the search statement under hostile limits.
 
+### Phase 5 amendments
+
+- **A5.1 The real database was migrated too.** The plan's scripts assume a
+  database named `gradcafe`; yours is `gradcafedb`, so the scripts take the name
+  as a variable. `migrate_ownership.sql` moved the existing table to
+  `gradcafe_owner` and applied the grants, and `.env` now connects the app as
+  `gradcafe_app`. The data was not touched, and the change reverses with
+  `ALTER TABLE applicants OWNER TO <previous owner>`.
+- **A5.2 The scripts are re-runnable.** `roles.sql` creates a role only if it is
+  missing and otherwise updates it, which is also how a password is rotated, and
+  `grants.sql` first strips every privilege so a hand-added grant does not
+  survive.
+- **A5.3 No cleartext password is sent, typed, or logged.** The plan passed
+  passwords to `psql -v`. Checking the server first showed two leaks that would
+  have created: the argument is visible in the process list, and
+  `log_min_error_statement` writes a failed statement, password included, to a
+  log file every local user can read. So `roles.sql` takes SCRAM-SHA-256
+  verifiers from the environment, made by the new `scripts/scram_verifier.py`.
+  The passwords were generated in memory and written only to the gitignored
+  `.env`. See [Credentials were checked for leaks](#credentials-were-checked-for-leaks).
+- **A5.4 `PUBLIC` is revoked,** on the database and on the table, so the grants
+  hold for every account on the server and not only the two named.
+- **A5.5 The Pull Data check uses an existing row.** To prove the account in
+  `.env` can use the pull path without adding data to your real database, the
+  gate re-sends a row that is already present: `ON CONFLICT DO NOTHING` still
+  needs the `INSERT` privilege, and nothing is written.
+- **A5.7 A missing table is "does not exist", not "permission denied".** The
+  least-privilege tests caught it: with the table dropped, a pull raised a raw
+  `UndefinedTable` instead of the clear message CHG-11 promised, because the
+  account cannot tell the two cases apart. `load_records` now maps both errors to
+  one message, and `test_load_records_maps_a_privilege_error_to_a_clear_message`
+  covers each.
+- **A5.8 The leak check is permanent.** `scripts/check_credential_leaks.py`
+  runs in the gate from Phase 5 on, so a password committed, logged, or left in
+  history later fails the gate and does not wait for a manual look.
+- **A5.9 No account can create temporary tables.** `REVOKE ALL ON DATABASE ...
+  FROM PUBLIC` also removes the `TEMP` privilege PostgreSQL grants to everyone
+  by default, from the owner as well as the app role. Nothing in the project
+  uses temporary tables, and `test_ddl_denied` checks the app role is refused.
+- **A5.10 One wrong expectation about `GRANT`.** A `GRANT` the app role is not
+  entitled to make is answered with a warning, not an error, and does nothing.
+  The test now checks it changed nothing, instead of expecting an exception.
+- **A5.6 `privileges.png` is committed and was checked against the database.**
+  It is a screenshot of `\dp applicants` on `gradcafedb`. It was compared with the
+  live output and matches: `gradcafe_owner=arwdDxtm` and `gradcafe_app=ar`, which
+  is `INSERT` and `SELECT` only. It shows table privileges but not role
+  attributes, so `privileges.txt` also carries `\du` and the per-privilege table.
+- **A5.11 Snyk Code was confirmed enabled, without sending the project.** It was
+  run on one throwaway file outside the repository. It authenticated as the org,
+  performed a static code analysis, and reported no issues, so Phase 8 can rely on
+  it. The leak-check instruction in the section above came from Josh at the
+  Phase 5 go-ahead.
+
 ### Phase 6 amendments, decided in advance
 
 - **A6.1 Compiled-SQL check allows exactly the Phase 3 LIMIT.** Phase 3
@@ -579,7 +710,9 @@ the rest name the phase that produces them.
       [CHG-05](#chg-05) and [CHG-08](#chg-08).
 - [x] **`LIMIT` on every query, with an enforced maximum** (Phases 3 and 4);
       see [CHG-07](#chg-07).
-- [ ] **Least-privilege database role** (Phase 5), with `privileges.png`.
+- [x] **Least-privilege database role** (Phase 5): `sql/roles.sql`,
+      `sql/grants.sql`, `sql/migrate_ownership.sql`, [privileges.txt](privileges.txt),
+      and the [privileges.png](privileges.png) screenshot of `\dp applicants`.
 - [ ] **10/10 Pylint evidence**, `pylint_report.txt` (Phase 6). The command is
       documented under [Security tooling](#security-tooling).
 - [ ] **`dependency.svg`** (Phase 7).
@@ -611,7 +744,7 @@ scan run in CI.
 | SQL injection defenses | composed, parameterized SQL, built apart from execution | `src/query_data.py`, `src/load_data.py`, `src/applicant_search.py` | done |
 | `LIMIT` enforcement | every query bounded, one definition of the maximum, clamped 1 to 100 | `src/db_safety.py` | done |
 | Searchable endpoint | `GET /api/applicants` | `src/applicant_search.py` | done |
-| Least privilege | owner and runtime roles | `sql/` | pending |
+| Least privilege | owner and runtime roles, `SELECT` and `INSERT` only | `sql/` | done |
 | Pylint 10.00/10 | fixes in code, no inline disables | `src/` | pending |
 | Dependency graph | pydeps and Graphviz | `dependency.svg` | pending |
 | Snyk | dependency and code scans | `snyk-analysis.png` | pending |
@@ -642,6 +775,7 @@ module_5/
 │   └── static/style.css        page styles
 ├── tests/                      all test code; conftest.py holds the fixtures
 │   ├── snapshots/              Module 4 answers and compiled SQL, for parity tests
+│   ├── test_least_privilege.py the two accounts, as the database sees them
 │   ├── test_applicant_search.py    the endpoint's contract and validation
 │   ├── test_sqli_malicious.py  the malicious-input matrix, against a real database
 │   ├── test_db_safety.py       limit clamping and input validation
@@ -651,6 +785,7 @@ module_5/
 │   ├── test_lint_policy.py     every test carries a marker
 │   ├── test_gate_checkers.py   the gate's own checkers
 │   └── test_*.py               the Module 4 suite, updated
+├── sql/                        roles.sql, grants.sql, migrate_ownership.sql
 ├── scripts/                    gate.sh, change-register and secrets checks,
 │                               lock regeneration, fresh-install check
 ├── docs/                       Sphinx project
@@ -670,8 +805,7 @@ resolve through the editable install of `setup.py` (see
 [CHG-01](#chg-01)); `src/` is deliberately not a package, because converting it
 would break parity with Module 3, where these files sat at the top level.
 
-Not yet present, and produced in later phases: `sql/` (role and grant
-scripts), `dependency.svg`, `snyk-analysis.png`, `pylint_report.txt`,
+Not yet present, and produced in later phases: `dependency.svg`, `snyk-analysis.png`, `pylint_report.txt`,
 `.pylintrc` content beyond the source root, `privileges.png`,
 `actions_success.png`, `module_5_report.pdf`, and
 `../.github/workflows/ci.yml`.
@@ -798,6 +932,96 @@ edit `setup.py` and run `scripts/regen_lock.sh`; do not edit the lock by hand.
 The project targets Python 3.14. Module 4's CI workflow pins 3.14.6 exactly
 (Module 5's workflow follows in Phase 9), and Read the Docs offers major.minor
 only, so it pins 3.14.
+
+### Database setup
+
+Run once, as a PostgreSQL superuser, from `module_5/`. `OWNER_PW` and `APP_PW`
+are passwords you choose; they go into `.env` and nowhere else. The scripts
+never receive a password. Each one is first turned into a SCRAM-SHA-256
+verifier, which PostgreSQL stores as it is, and handed over in the
+environment. A password on a `psql` command line shows in the process list, and
+one inside a statement is written to the server log if the statement fails, so
+neither is used. See [Credentials were checked for leaks](#credentials-were-checked-for-leaks).
+
+```bash
+# 1. The two roles, and a database only they can connect to
+export OWNER_VERIFIER=$(printf %s "$OWNER_PW" | python3 scripts/scram_verifier.py)
+export APP_VERIFIER=$(printf %s "$APP_PW" | python3 scripts/scram_verifier.py)
+psql -d postgres -v db=gradcafedb -f sql/roles.sql
+
+# 2a. A new database: the owner creates the table and loads the data
+DB_OWNER_USER=gradcafe_owner DB_OWNER_PASSWORD="$OWNER_PW" python3 src/load_data.py
+psql -d gradcafedb -f sql/grants.sql
+
+# 2b. An existing database: move the table under the owner instead
+psql -d gradcafedb -f sql/migrate_ownership.sql
+```
+
+Then set `DB_USER=gradcafe_app` and `DB_PASSWORD` in `.env`. Leave the owner's
+credentials out of it, and give them to the loader only for the moment you run
+it, as above. For the test database, repeat step 1 with `-v db=gradcafe_test`,
+create the table as the owner, apply `sql/grants.sql`, and set
+`TEST_DATABASE_URL` and `TEST_ADMIN_DATABASE_URL`. See [CHG-12](#chg-12) for
+what each account may do and why.
+
+### Credentials were checked for leaks
+
+**Why this section exists.** Phase 5 creates real accounts with real
+passwords, and a security control that is only asserted is an unverified claim.
+Module 5 is about assurance, which means evidence that a property holds and not
+confidence that it should. At the go-ahead for the live setup, the instruction
+was to make sure no credential was being logged, to test that it was not, and to
+document that the check was done. That instruction is the reason for everything
+below. It also found two leaks the original plan would have produced, which is
+the argument for checking: they were invisible until someone looked at the
+server's own settings.
+
+A password can leak by more routes than a committed file, so the setup was
+designed around four of them and then checked directly, with the real values,
+rather than assumed safe.
+
+| Route | What would have happened | What is done instead |
+| --- | --- | --- |
+| The process list | `psql -v owner_pw=...` puts the password on a command line any local user can read | Passwords are never arguments. `roles.sql` reads them from the environment, and `scram_verifier.py` reads one from standard input |
+| The server log | PostgreSQL writes the text of a statement that **fails** to its log (`log_min_error_statement` is `error` here), and this install's log file is readable by every local user, so a failed `ALTER ROLE ... PASSWORD 'secret'` would have published the password | The statement carries a SCRAM-SHA-256 verifier, a salted hash that PostgreSQL stores unchanged. The cleartext never reaches the server |
+| Shell and psql history | A password typed into a command is recorded in `~/.zsh_history` or `~/.psql_history` | The passwords were generated in memory, never typed, and never put on a command line |
+| Documentation | A README that says `-v owner_pw=...` teaches the leak | A test fails if the setup instructions mention a cleartext password argument |
+
+**Checked, not assumed.** After provisioning, the real passwords were searched
+for in the PostgreSQL log, `~/.zsh_history`, `~/.bash_history`, `~/.psql_history`,
+every file in the repository, the scratch directory, and everything `psql` and
+Python printed during setup: **no match anywhere**. A cleartext login also works
+against the stored verifier, which shows the verifier approach is sound and not
+a role nobody can log in as.
+
+**Why the check is permanent and not a one-time look.** A one-time search proves
+the state of the world at that moment and says nothing about the next commit.
+The ways it can regress are ordinary: someone pastes a working command into the
+README, a new log line prints a connection string, a CI step echoes the
+environment, a debugging session commits a `.env` fragment. None of these needs
+anyone to be careless about security, only to be busy. So the check runs on every
+gate, where a leak stops the commit, and it searches git history as well as the
+tree, because deleting a leaked file does not remove it from the repository. This
+is the same idea as the rest of the module: Pylint at 10.00, the SQL guard, and
+the least-privilege tests all move a failure to the earliest and cheapest point,
+before it ships.
+
+**Checked on every gate from Phase 5 on.** `scripts/check_credential_leaks.py`
+reads the passwords out of `.env` and searches the working tree, every commit in
+git history (so a leak that was later deleted still fails), the server log, and
+the shell history files. It prints counts and labels only, and never a password:
+git receives its search patterns from a private temporary file, not an argument.
+Its own tests plant a password in a file, a log, and a deleted commit and require
+that each is found, and require that the output never contains it. Each of those
+tests was also confirmed to fail against a deliberately broken copy of the check.
+`scripts/check_secrets.py` additionally scans `sql/` for a password literal.
+
+**What this does not cover.** The cleartext passwords exist in `.env`, which is
+gitignored and mode 600, because the application and the test fixtures need
+them. The owner's password is in `TEST_ADMIN_DATABASE_URL` for the same reason.
+The verifiers sit in PostgreSQL's `pg_authid`, readable only by superusers. A
+screen share, a backup of the data directory, or a process that can read another
+process's environment is outside what a repository can protect.
 
 ### LLM standardizer setup
 

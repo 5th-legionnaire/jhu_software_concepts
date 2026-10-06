@@ -177,28 +177,50 @@ def db_url():
 
 
 @pytest.fixture
-def clean_db(db_url):
+def admin_url():
+    """The owner account's URL for the test database, from TEST_ADMIN_DATABASE_URL.
+
+    The suite's fixtures create the schema and TRUNCATE, which the runtime
+    account is deliberately not allowed to do (CHG-13). Tests that exercise the
+    application connect as the runtime account through db_url; only fixtures
+    and the least-privilege tests use this. Like db_url it has no default.
+    """
+    url = os.environ.get("TEST_ADMIN_DATABASE_URL")
+    if not url:
+        pytest.fail(
+            "TEST_ADMIN_DATABASE_URL is not set. It must name the owner account "
+            "(gradcafe_owner) on the disposable test database; see .env.example "
+            "and the README's Installation and setup section.",
+            pytrace=False,
+        )
+    return url
+
+
+@pytest.fixture
+def clean_db(db_url, admin_url):
     """Build the schema and truncate the applicants table before and after a test.
 
-    Uses load_data.create_table rather than Base.metadata.create_all, so the
-    schema under test is the production one: column comments and the
-    ON CONFLICT (p_id) target included. Yields a session factory bound to
-    the test database, for tests that read through the ORM directly.
+    Connects as the owner, because creating the table and TRUNCATE are owner
+    privileges. Uses load_data.create_table rather than Base.metadata.create_all,
+    so the schema under test is the production one: column comments and the
+    ON CONFLICT (p_id) target included. Yields a session factory bound to the
+    test database as the runtime account, for tests that read through the ORM.
     """
     if db_url == UNCONFIGURED_URL:
         pytest.fail(
             "TEST_DATABASE_URL is not set. Point it at a disposable PostgreSQL "
-            "database (see .env.example and the README's Installation and setup "
-            "section); db and integration tests truncate its applicants table.",
+            "database as the runtime account (see .env.example and the README's "
+            "Installation and setup section); db and integration tests truncate "
+            "its applicants table.",
             pytrace=False,
         )
-    config = get_db_config(db_url)
+    config = get_db_config(admin_url)
 
     def _reset():
         connection = create_connection(config)
         if connection is None:
             pytest.fail(
-                "PostgreSQL is not reachable with TEST_DATABASE_URL. Start PostgreSQL "
+                "PostgreSQL is not reachable with TEST_ADMIN_DATABASE_URL. Start PostgreSQL "
                 "and create the test database (see the README's Installation and "
                 "setup section) before running db or integration tests.",
                 pytrace=False,

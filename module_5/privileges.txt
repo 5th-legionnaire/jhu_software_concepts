@@ -1,0 +1,43 @@
+privileges.txt: database accounts and table privileges, as PostgreSQL reports them.
+Captured 2026-10-05 22:17 EDT from database gradcafedb with psql. No password or verifier appears in this output.
+
+--- \du gradcafe*   (the two roles and their attributes)
+          List of roles
+   Role name    |   Attributes   
+----------------+----------------
+ gradcafe_app   | 20 connections
+ gradcafe_owner | 
+
+--- \dp applicants  (who holds which privilege on the table)
+                                          Access privileges
+ Schema |    Name    | Type  |           Access privileges            | Column privileges | Policies 
+--------+------------+-------+----------------------------------------+-------------------+----------
+ public | applicants | table | gradcafe_owner=arwdDxtm/gradcafe_owner+|                   | 
+        |            |       | gradcafe_app=ar/gradcafe_owner         |                   | 
+(1 row)
+
+--- table owner and row count
+owner: gradcafe_owner
+rows: 30019
+
+--- what the runtime account (gradcafe_app) holds on applicants, one privilege at a time
+ privilege  | gradcafe_app | gradcafe_owner 
+------------+--------------+----------------
+ SELECT     | t            | t
+ INSERT     | t            | t
+ UPDATE     | f            | t
+ DELETE     | f            | t
+ TRUNCATE   | f            | t
+ REFERENCES | f            | t
+ TRIGGER    | f            | t
+(7 rows)
+
+--- who can connect to gradcafedb (PUBLIC has no CONNECT)
+    rolname     | can_connect | superuser 
+----------------+-------------+-----------
+ gradcafe_app   | t           | f
+ gradcafe_owner | t           | f
+ jjlatz         | t           | t
+ postgres       | t           | t
+(4 rows)
+

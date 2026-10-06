@@ -202,7 +202,8 @@ def _example_names():
 
 def test_env_example_lists_every_variable_the_code_reads():
     read = {name for env in ld.ROLE_ENV.values() for name in env.values()}
-    read |= set(ld.DB_LOCATION_ENV.values()) | {"DATABASE_URL", "TEST_DATABASE_URL"}
+    read |= set(ld.DB_LOCATION_ENV.values()) | {"DATABASE_URL", "TEST_DATABASE_URL",
+                                               "TEST_ADMIN_DATABASE_URL"}
     assert _example_names() == read
 
 

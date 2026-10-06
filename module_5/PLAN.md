@@ -623,7 +623,38 @@ for Josh's existing local DB.
 - `test_pull_succeeds_as_app_role`: proves the minimum is also sufficient.
 - `test_app_fixture_connects_as_app_role`: guards against the harness quietly running as a superuser.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A5.1** Josh's database is `gradcafedb`, so the scripts take the name as `-v db`. `migrate_ownership.sql`
+  moved the existing table to `gradcafe_owner` and `.env` now connects as `gradcafe_app`. Data untouched,
+  reversible with `ALTER TABLE ... OWNER TO`.
+- **A5.2** `roles.sql` creates a role only if missing, else updates it (also how a password is rotated);
+  `grants.sql` first strips every privilege. Both are safe to rerun.
+- **A5.3** No cleartext password is sent, typed, or logged. The plan's `psql -v` would have put it in the process
+  list, and `log_min_error_statement=error` would have written a failed `ALTER ROLE ... PASSWORD` to a
+  world-readable server log. `roles.sql` instead takes SCRAM-SHA-256 verifiers from the environment
+  (`scripts/scram_verifier.py`). Passwords were generated in memory and written only to the gitignored `.env`.
+  **Verified:** after provisioning, the real passwords were searched for in the server log, shell and psql
+  history, every repository file, the scratch directory, and all setup output: no match. A cleartext login
+  works against the stored verifier.
+- **A5.4** `PUBLIC` is revoked on the database and the table.
+- **A5.5** The Pull Data exit check re-sends a row already in the database: `ON CONFLICT DO NOTHING` still needs
+  `INSERT`, and nothing is written to Josh's real data.
+- **A5.7** A missing table raises `UndefinedTable`, not a privilege error; `load_records` maps both to one
+  clear message (found by the least-privilege tests, with a failing run before the fix).
+- **A5.8** `scripts/check_credential_leaks.py` is part of the gate from Phase 5 on: it reads the passwords from
+  `.env` and searches the tree, all git history, the server log, and the shell history, printing counts only.
+- **A5.9** `REVOKE ALL ON DATABASE FROM PUBLIC` also removes `TEMP` from every account, owner included.
+- **A5.10** An unentitled `GRANT` is a warning that does nothing, not an error; the test asserts it changed nothing.
+- **A5.6** `privileges.png` (a screenshot of `\dp applicants`) is committed and was compared with the live
+  database: owner `arwdDxtm`, `gradcafe_app` `ar`. `privileges.txt` adds `\du` and a per-privilege table.
+- **A5.11** Snyk Code was confirmed enabled by running it on one throwaway file outside the repository (it
+  authenticated, analyzed, reported 0 issues). Josh asked at the Phase 5 go-ahead for the credential leak
+  check, and for it to be tested and documented: it exists because an asserted control is an unverified
+  claim, and it is permanent because a one-time search proves only the moment it ran.
+
 **Exit:** standard gate plus:
+- No password from `.env` appears in the tree, git history, server log, or shell history
+  (`scripts/check_credential_leaks.py`, added by A5.8).
 - The app runs locally against `.env` with `DB_USER=gradcafe_app`, and Pull Data works with a faked
   scraper.
 - `privileges.png` captured (`\du` and `\dp applicants`).

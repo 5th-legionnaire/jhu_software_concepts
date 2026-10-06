@@ -16,7 +16,7 @@ Contains:
     execute_query():     run a single composed statement in its own transaction
     build_create_table(), build_insert(), build_count():
                          compose the statements, touching no database
-    create_table():      create the applicants table and attach its column descriptions
+    create_table():      create the applicants table and attach its column descriptions (owner only)
     insert_records():    load records already in memory, in one transaction
     load_data():         read records back from a JSON file and load them into a PostgreSQL database
 
@@ -462,9 +462,13 @@ def load_data(connection, path=DEFAULT_DATA_FILE):
 
 
 def main():
-    """Create the table if needed, then load the Module 2 data."""
+    """Create the table if needed, then load the Module 2 data.
+
+    Connects as the owner role: schema setup and the bulk load are the owner's
+    job, and the runtime account has neither privilege (CHG-11, CHG-12).
+    """
     path = sys.argv[1] if len(sys.argv) > 1 else DEFAULT_DATA_FILE
-    connection = create_connection(get_db_config())
+    connection = create_connection(get_db_config(role="owner"))
     if connection is None:
         sys.exit(1)
     try:

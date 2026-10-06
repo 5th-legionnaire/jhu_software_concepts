@@ -15,6 +15,7 @@ launches Chrome, an LLM, or a network request, and nothing calls sleep().
 import datetime
 import json
 
+import psycopg
 import pytest
 
 import clean
@@ -381,6 +382,41 @@ def test_load_records_with_no_records_returns_zero_without_connecting():
 def test_load_records_raises_when_the_database_is_unreachable():
     with pytest.raises(PullError, match="database could not be reached"):
         load_records([{"url": "x"}], connect=lambda: None)
+
+
+class _Connection:
+    """A connection stand-in that only records being closed."""
+
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+@pytest.mark.parametrize("refusal", [
+    psycopg.errors.InsufficientPrivilege("permission denied for table applicants"),
+    psycopg.errors.UndefinedTable('relation "applicants" does not exist'),
+], ids=["no-privilege", "no-table"])
+def test_load_records_maps_a_privilege_error_to_a_clear_message(monkeypatch, refusal):
+    """Missing grants or a missing table is explained, and the connection is still closed."""
+    connection = _Connection()
+
+    def _denied(_connection, _records):
+        raise refusal
+
+    monkeypatch.setattr(pd, "insert_records", _denied)
+    with pytest.raises(PullError, match="not allowed to add entries.*sql/grants.sql") as caught:
+        load_records([{"url": "x"}], connect=lambda: connection)
+
+    assert connection.closed
+    assert "applicants\"" not in str(caught.value) and "permission denied" not in str(caught.value), \
+        "the driver's text must not leak"
+
+
+def test_load_records_does_not_create_the_table():
+    """CHG-11: there is no DDL helper left in the pull module to call."""
+    assert not hasattr(pd, "create_table")
 
 
 # --- main: the command-line entry point, all three outcomes ----------------

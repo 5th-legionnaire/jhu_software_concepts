@@ -291,6 +291,50 @@ assert client.get('/api/applicants?debug=1').status_code == 400
 " >/dev/null 2>&1 || fail G9 "GET /api/applicants did not clamp and reject as specified"
         ok G9 "GET /api/applicants clamps a huge limit and rejects an unknown parameter"
         ;;
+    5)
+        # The real credentials in .env appear nowhere they should not.
+        "$PY" scripts/check_credential_leaks.py >"$GATE_DIR/phase-5-leaks.log" 2>&1 \
+            || fail G9 "a password from .env leaked; see .gate/phase-5-leaks.log"
+        ok G9 "no password from .env is in the tree, git history, server log, or shell history"
+
+        # The account in .env is the least-privilege one, and the app and the
+        # pull path work as it, from a cleared environment so nothing comes
+        # from the shell. The pull re-sends a row that is already present:
+        # ON CONFLICT DO NOTHING still needs INSERT, and no data is written.
+        env -i HOME="$HOME" PATH="$PATH" PYTHONPATH=src "$PY" -c "
+from psycopg import sql
+from app import create_app
+from load_data import create_connection, get_db_config
+import pull_data
+
+config = get_db_config()
+assert config['user'] == 'gradcafe_app', 'DB_USER in .env is not gradcafe_app'
+connection = create_connection(config)
+with connection.cursor() as cursor:
+    cursor.execute(sql.SQL('SELECT rolsuper, rolcreaterole, rolcreatedb FROM pg_roles WHERE rolname = current_user LIMIT 1'))
+    assert cursor.fetchone() == (False, False, False), 'the .env account has elevated attributes'
+    cursor.execute(sql.SQL('SELECT url, (SELECT COUNT(*) FROM applicants) FROM applicants ORDER BY p_id LIMIT 1'))
+    url, before = cursor.fetchone()
+connection.close()
+
+assert create_app(testing=True).test_client().get('/analysis').status_code == 200
+added = pull_data.load_records([{'url': url}], connect=lambda: create_connection(config))
+assert added == 0, 'a re-sent row must not be inserted twice'
+connection = create_connection(config)
+with connection.cursor() as cursor:
+    cursor.execute(sql.SQL('SELECT COUNT(*) FROM applicants LIMIT 1'))
+    assert cursor.fetchone()[0] == before, 'the row count changed'
+connection.close()
+" >"$GATE_DIR/phase-5-account.log" 2>&1 \
+            || fail G9 "the .env account failed the least-privilege checks; see .gate/phase-5-account.log"
+        ok G9 ".env account is gradcafe_app, not a superuser; /analysis renders; a pull works and writes nothing"
+
+        [ -s privileges.txt ] && grep -q "gradcafe_app" privileges.txt && ! grep -q "SCRAM" privileges.txt \
+            || fail G9 "privileges.txt is missing, or holds a verifier"
+        [ "$(head -c 8 privileges.png 2>/dev/null | od -An -tx1 | tr -d ' ')" = "89504e470d0a1a0a" ] \
+            || fail G9 "privileges.png is missing or is not a PNG"
+        ok G9 "privileges.txt free of verifiers; privileges.png present and a valid PNG"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

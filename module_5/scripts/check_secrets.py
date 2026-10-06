@@ -25,8 +25,8 @@ import re
 import sys
 
 MODULE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SCAN_DIRS = ("src", "tests")
-SCAN_SUFFIXES = (".py", ".html", ".js", ".ini", ".cfg", ".toml", ".yml", ".yaml", ".txt")
+SCAN_DIRS = ("src", "tests", "sql")
+SCAN_SUFFIXES = (".py", ".html", ".js", ".ini", ".cfg", ".toml", ".yml", ".yaml", ".txt", ".sql")
 
 # A password embedded in a URL: scheme://user:password@host
 URL_PASSWORD = re.compile(r"[a-z][a-z0-9+.-]*://[^\s:/@\"']+:([^\s@\"']+)@", re.IGNORECASE)
@@ -34,8 +34,12 @@ URL_PASSWORD = re.compile(r"[a-z][a-z0-9+.-]*://[^\s:/@\"']+:([^\s@\"']+)@", re.
 # throwaway configs on purpose.
 PASSWORD_LITERAL = re.compile(
     r"""(?i)\bpass(?:word|wd)?["']?\s*[:=]\s*["']([^"'\s]+)["']""")
+# psql's :'name' syntax substitutes a variable, so PASSWORD :'name' carries no
+# literal. Only this exact form is exempt from the literal check.
+PSQL_VARIABLE = re.compile(r"(?i)\bPASSWORD\s+:'\w+'")
 TOKEN_SHAPES = {
     "private key block": re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----"),
+    "password literal in SQL": re.compile(r"(?i)\bPASSWORD\s+'[^']+'"),
     "AWS access key": re.compile(r"\bAKIA[0-9A-Z]{16}\b"),
     "GitHub token": re.compile(r"\bgh[pousr]_[A-Za-z0-9]{36,}\b"),
     "Snyk or other UUID API token assigned to a name": re.compile(
@@ -82,7 +86,7 @@ def scan_file(path, rel, phase):
             for match in URL_PASSWORD.finditer(line):
                 if not is_placeholder(match.group(1)):
                     findings.append(f"{rel}:{number}: password embedded in a URL")
-            if rel.startswith("src" + os.sep):
+            if rel.startswith("src" + os.sep) and not PSQL_VARIABLE.search(line):
                 for match in PASSWORD_LITERAL.finditer(line):
                     if not is_placeholder(match.group(1)):
                         findings.append(f"{rel}:{number}: password assigned a literal")

@@ -65,6 +65,7 @@ BAD_LINES = [
      "password embedded in a URL"),
     ('password = "' + "hunter2" + '"', "password assigned a literal"),
     ('PASSWORD: "' + "hunter2" + '"', "password assigned a literal"),
+    ("ALTER ROLE app WITH PASSWORD " + "'" + "hunter2" + "'", "password literal in SQL"),
     ("-----BEGIN RSA " + "PRIVATE KEY-----", "private key block"),
     ("key = " + "AKIA" + "IOSFODNN7EXAMPLE", "AWS access key"),
     ("t = " + "ghp_" + "a" * 36, "GitHub token"),
@@ -85,6 +86,7 @@ def test_secrets_scan_flags_credential_shapes(secrets, tmp_path, line, expected)
     'URL = "postgresql://app:change-me@localhost/gradcafe"',
     'URL = "postgresql://user:${DB_PASSWORD}@host/db"',
     'CFG = {"password": "DB_PASSWORD"}',
+    "ALTER ROLE app WITH LOGIN PASSWORD :'app_verifier'",     # a psql variable, not a literal
     'password = "pass"',
     "x = os.environ['DB_PASSWORD']",
 ])
@@ -351,3 +353,91 @@ def test_gate_log_refuses_when_head_is_not_that_phases_commit(gate_repo):
     result = _gate(repo, "log", "1", "n")
     assert result.returncode == 1 and "not the phase 1 commit" in result.stderr
     assert plan.read_text(encoding="utf-8") == PLAN_TEXT
+
+
+# --- check_credential_leaks.py: the real passwords must be found if they leak --
+
+@pytest.fixture(scope="module")
+def leaks():
+    return _load("check_credential_leaks")
+
+
+SECRET = "Zq7-recognizable-secret-0451"
+
+
+def _env(tmp_path, *lines):
+    path = tmp_path / ".env"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    return path
+
+
+def test_leak_check_reads_passwords_from_variables_and_urls(leaks, tmp_path):
+    url_password = "url%2Fpassword-9930"
+    env = _env(tmp_path, "DB_PASSWORD=" + SECRET, "# DB_OWNER_PASSWORD=commented-out-secret-1",
+               "DB_HOST=localhost", "TEST_DATABASE_URL=postgresql://u:" + url_password + "@h/db",
+               "DB_USER=shortpw", "OTHER_PASSWORD=short")
+    assert leaks.credentials(env) == {SECRET, "url/password-9930"}
+
+
+def test_leak_check_ignores_placeholders_and_short_values(leaks, tmp_path):
+    env = _env(tmp_path, "DB_PASSWORD=change-me", "X_PASSWORD=abc", "Y_URL=postgresql://u:change-me@h/d")
+    assert leaks.credentials(env) == set()
+
+
+def test_leak_check_finds_a_password_planted_in_a_file(leaks, tmp_path):
+    (tmp_path / "notes.txt").write_text("remember " + SECRET, encoding="utf-8")
+    (tmp_path / "clean.txt").write_text("nothing here", encoding="utf-8")
+    report = leaks.scan({SECRET}, [tmp_path], [])
+    assert report[f"files under {tmp_path.name}/"] == (2, 1)
+
+
+def test_leak_check_finds_a_password_in_a_log_or_history_file(leaks, tmp_path):
+    log = tmp_path / "postgresql.log"
+    log.write_text("ERROR: statement: ALTER ROLE x PASSWORD " + "'" + SECRET + "'", encoding="utf-8")
+    assert leaks.scan({SECRET}, [], [log, tmp_path / "missing.log"])["logs and history"] == (1, 1)
+
+
+def test_leak_check_passes_a_clean_tree(leaks, tmp_path):
+    (tmp_path / "a.py").write_text("print('hello')", encoding="utf-8")
+    assert leaks.scan({SECRET}, [tmp_path], [])[f"files under {tmp_path.name}/"] == (1, 0)
+
+
+def test_leak_check_never_searches_the_env_file_or_the_venv(leaks, tmp_path):
+    (tmp_path / ".env").write_text("DB_PASSWORD=" + SECRET, encoding="utf-8")
+    (tmp_path / ".venv").mkdir()
+    (tmp_path / ".venv" / "site.py").write_text(SECRET, encoding="utf-8")
+    assert leaks.scan({SECRET}, [tmp_path], [])[f"files under {tmp_path.name}/"] == (0, 0)
+
+
+def test_leak_check_finds_a_password_that_was_committed_and_later_removed(leaks, tmp_path):
+    """History is searched, so deleting a leaked file does not hide the leak."""
+    import subprocess
+    git = lambda *args: subprocess.run(["git", "-C", str(tmp_path), *args], check=True,
+                                       capture_output=True,
+                                       env={**os.environ, "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@x.io",
+                                            "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@x.io"})
+    git("init", "-q")
+    (tmp_path / "oops.txt").write_text(SECRET, encoding="utf-8")
+    git("add", "-A"); git("commit", "-q", "-m", "oops")
+    git("rm", "-q", "oops.txt"); git("commit", "-q", "-m", "remove it")
+    assert leaks.history_matches({SECRET}, tmp_path) == (2, 1)
+    assert leaks.history_matches({"a-different-secret-5555"}, tmp_path) == (2, 0)
+
+
+def test_leak_check_output_never_contains_a_password(leaks, tmp_path, monkeypatch, capsys):
+    env = _env(tmp_path, "DB_PASSWORD=" + SECRET)
+    (tmp_path / "leaky.txt").write_text(SECRET, encoding="utf-8")
+    monkeypatch.setattr(leaks, "MODULE_DIR", tmp_path)
+    monkeypatch.setattr(leaks, "REPO_DIR", tmp_path)
+    monkeypatch.setattr(leaks, "_log_files", lambda: [])
+    monkeypatch.setattr(leaks, "history_matches", lambda *_args: (0, 0))
+    assert env.exists() and leaks.main() == 1
+    shown = capsys.readouterr()
+    assert SECRET not in shown.out + shown.err
+    assert "LEAK" in shown.out
+
+
+def test_leak_check_with_no_env_file_is_a_pass(leaks, tmp_path, monkeypatch, capsys):
+    monkeypatch.setattr(leaks, "MODULE_DIR", tmp_path)
+    assert leaks.main() == 0
+    assert "No .env" in capsys.readouterr().out

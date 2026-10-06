@@ -132,16 +132,19 @@ def test_load_data_reads_a_file_and_loads_it(clean_db, fake_rows, db_url, tmp_pa
 # --- main: both branches ----------------------------------------------------
 
 def test_main_exits_when_the_database_is_unreachable(monkeypatch):
+    # DATABASE_URL satisfies the owner role's configuration, whatever .env holds.
+    monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg://localhost:1/none")
     monkeypatch.setattr(ld, "create_connection", lambda config: None)
     with pytest.raises(SystemExit):
         ld.main()
 
 
 def test_main_creates_the_table_and_loads_the_given_file(
-        monkeypatch, clean_db, fake_rows, db_url, tmp_path, capsys):
+        monkeypatch, clean_db, fake_rows, admin_url, tmp_path, capsys):
     path = tmp_path / "records.json"
     path.write_text(json.dumps(fake_rows), encoding="utf-8")
-    monkeypatch.setenv("DATABASE_URL", db_url)
+    # main() runs as the owner role, the only one allowed to create the table.
+    monkeypatch.setenv("DATABASE_URL", admin_url)
     monkeypatch.setattr("sys.argv", ["load_data.py", str(path)])
 
     ld.main()
