@@ -703,7 +703,7 @@ committed. `test_compiled_sql_unchanged` passes. Behavior parity holds (the run_
   the bound parameters are the snapshot's parameters plus that one limit value. The Phase 0 snapshot is
   never re-captured, so the test shows the LIMIT is the only change across Phases 3 and 6.
 
-### Phase 7: Dependency graph
+### Phase 7: Dependency graph (COMPLETE)
 
 **Entry:** standard. `dot -V` works. Pylint at 10, so the module structure is final.
 
@@ -920,3 +920,4 @@ Appended by `gate.sh` at each phase exit.
 | 4 | 2026-10-05 22:08 | 439845e | 443 | 100.00% | 8.68 | GET /api/applicants, Services seam, 51-case malicious-input matrix, live curl spot-checks; amendments A4.1 to A4.8. |
 | 5 | 2026-10-05 22:28 | c65c87c | 509 | 100.00% | 8.68 | Least-privilege roles, SCRAM verifiers, permanent credential leak check, privileges.txt and privileges.png; real DB migrated; amendments A5.1 to A5.11. |
 | 6 | 2026-10-05 22:37 | 2b50373 | 549 | 100.00% | 10.00 | Pylint 10.00/10 with no disables, stuck-busy fix, scrape and ORM refactors, compiled SQL and answer parity held; amendments A6.1 to A6.7. |
+| 7 | 2026-10-05 22:43 | e6366d7 | 563 | 100.00% | 10.00 | dependency.svg with collapsed packages, 7-sentence explanation verified against the edges, graph regeneration tests; amendments A7.1 to A7.5. |
