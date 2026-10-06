@@ -8,17 +8,16 @@ Joshua Latz (jlatz1)
 Written for Module 3; see the README for what Modules 4 and 5 changed.
 
 Contains:
-    get_db_config():     connection settings for a role, from an explicit URL,
-                         DATABASE_URL, or the DB_* variables
-    create_connection(): open a connection using those settings, logging a
-                         sanitized message on failure
-    COLUMNS:             the one list of table columns that the DDL and the INSERT are built from
-    execute_query():     run a single composed statement in its own transaction
-    build_create_table(), build_insert(), build_count():
-                         compose the statements, touching no database
-    create_table():      create the applicants table and attach its column descriptions (owner only)
-    insert_records():    load records already in memory, in one transaction
-    load_data():         read records back from a JSON file and load them into a PostgreSQL database
+    get_db_config():      settings for a role, from a URL, DATABASE_URL, or the DB_* variables
+    create_connection():  open a connection, logging a sanitized message on failure
+    COLUMNS:              the one column list the DDL and the INSERT are built from
+    execute_query():      run one composed statement in its own transaction
+    build_create_table(): compose CREATE TABLE, touching no database
+    build_insert():       compose the INSERT, touching no database
+    build_count():        compose the row count, touching no database
+    create_table():       create the table and its column descriptions (owner only)
+    insert_records():     load records already in memory, in one transaction
+    load_data():          read records from a JSON file and load them into PostgreSQL
 
 Usage (from module_5/):
     python3 src/load_data.py [path/to/llm_extend_applicant_data.json]

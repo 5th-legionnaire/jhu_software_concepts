@@ -7,6 +7,18 @@ Web application
 .. automodule:: app
    :members:
 
+Search endpoint
+---------------
+
+.. automodule:: applicant_search
+   :members:
+
+Query safety
+------------
+
+.. automodule:: db_safety
+   :members:
+
 Scraping
 --------
 

@@ -27,7 +27,7 @@ to create_app(), and every default is the real implementation, so running
 loader, query, or search instead, and reaches no network and no database.
 
 The two buttons answer JSON rather than redirecting, which is what lets a
-caller see a result rather than a 302:
+caller see a result rather than a 302. The routes and their answers::
 
     POST /pull-data        200 {"ok": true, "inserted": n}   finished here
                            202 {"ok": true, "started": true} running in the background

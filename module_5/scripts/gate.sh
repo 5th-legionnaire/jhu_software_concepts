@@ -437,6 +437,30 @@ assert before['vulnerabilities'], 'the before-upgrade record is empty'
             echo "  --  G9  live stage skipped (run GATE_CI_LIVE=1 scripts/gate.sh 9 after the first green run)"
         fi
         ;;
+    10)
+        # The Sphinx docs build with every warning treated as an error, so Read the
+        # Docs can fail on warnings too.
+        rm -rf docs/_build
+        "$PY" -m sphinx -W -q -b html docs docs/_build/html >"$GATE_DIR/phase-10-sphinx.log" 2>&1 \
+            || fail G9 "the Sphinx build has warnings or errors; see .gate/phase-10-sphinx.log"
+        ok G9 "Sphinx builds with no warnings (-W)"
+
+        # The report exists, is a PDF, and its test count matches the evidence.
+        [ "$(head -c 4 module_5_report.pdf 2>/dev/null)" = "%PDF" ] || fail G9 "module_5_report.pdf is missing or not a PDF"
+        grep -q "$passed passed" coverage_summary.txt \
+            || fail G9 "coverage_summary.txt does not show this run's $passed tests; regenerate it, then the report"
+        ok G9 "module_5_report.pdf present; coverage_summary.txt matches this run ($passed passed)"
+
+        # Every file the README links to exists.
+        "$PY" - <<'PYCHECK' || fail G9 "the README links to a file that does not exist"
+import os, re, sys
+text = open("README.md", encoding="utf-8").read()
+missing = sorted({f for f in re.findall(r"\]\((?!http|#)([^)#]+)", text) if not os.path.exists(f)})
+print("missing:", missing) if missing else None
+sys.exit(1 if missing else 0)
+PYCHECK
+        ok G9 "every file the README links to exists"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

@@ -9,6 +9,8 @@ holds an :class:`app.PullState` object with a plain ``busy`` flag, set and
 read directly rather than polled from a subprocess or a timer. While busy,
 both ``POST /pull-data`` and ``POST /update-analysis`` return ``409``
 ``{"busy": true}`` and perform no work; a gated pull never calls the loader.
+The pull job clears the flag in a ``finally`` block, so an error nobody
+anticipated cannot leave the app refusing every later pull.
 
 This is a change from Module 3, which allowed ``Update Analysis`` to refresh
 during a pull and said so in its notice. Module 3's reasoning was, and
@@ -28,12 +30,11 @@ Idempotency and uniqueness
 key, and ``url`` additionally carries a ``UNIQUE`` constraint; the two agree
 by construction, since the id is parsed out of that same URL.
 
-Every insert uses:
+Every insert is composed by :func:`load_data.build_insert` and ends in:
 
 .. code-block:: sql
 
-   INSERT INTO applicants (...) VALUES (...)
-   ON CONFLICT (p_id) DO NOTHING;
+   ON CONFLICT ("p_id") DO NOTHING
 
 A pull whose date window overlaps a previous one, or is run twice in a row
 with no new Grad Cafe data in between, reinserts nothing: rows already
@@ -65,8 +66,15 @@ naming the missing variable and never a value.
 ``integration`` markers do; ``clean_db`` fails loudly with a message naming
 what to start, rather than skipping silently, since a silent skip would
 quietly reduce coverage while looking like a neutral result. They also need
-``TEST_DATABASE_URL`` to name a disposable database; without it ``clean_db``
-fails with a message saying so.
+``TEST_DATABASE_URL`` and ``TEST_ADMIN_DATABASE_URL`` to name a disposable
+database as the runtime and the owner account; without them the fixtures fail
+with a message naming the variable.
+
+**Pull Data says the account is not allowed to add entries.** The runtime
+account issues no DDL. If the table does not exist, or ``sql/grants.sql`` was
+never applied, the pull stops with that message and writes nothing. Create the
+table as the owner (``python3 src/load_data.py`` with the ``DB_OWNER_*``
+settings) and apply the grants.
 
 **Chrome or ChromeDriver mismatch, during a real Pull Data.** Selenium
 Manager resolves a matching ChromeDriver automatically; no separate driver
@@ -81,6 +89,8 @@ nothing to the database. It keeps its own virtual environment under
 ``llm_hosting/.venv``, separate from the main one, because it depends on
 ``llama-cpp-python``, which compiles native code.
 
-**CI-specific.** ``.github/workflows/tests.yml`` starts a Postgres 16
-service and sets ``DATABASE_URL`` to match it directly; nothing environment-
-specific needs to be configured by hand there.
+**CI-specific.** ``.github/workflows/ci.yml`` starts a PostgreSQL 16 service,
+creates the two roles from per-run random passwords (masked in the log and
+passed as SCRAM verifiers), creates the table as the owner, applies the
+grants, and runs the suite as the runtime account. Nothing needs configuring
+by hand. Module 4's ``tests.yml`` is untouched and still tests ``module_4``.

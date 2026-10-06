@@ -821,6 +821,9 @@ score is below 10" means fail on any test failure, with the 100% coverage gate o
 - **A9.6** The first CI run found three tests that passed locally only because of `.env` (two needed `DB_HOST`;
   one compared platform-dependent third-party graph edges). The suite is now hermetic (`conftest.py` disables the
   `.env` loader and takes only the two test URLs by name), and the graph test compares the project's own imports.
+- **A10.5** Sphinx docs rewritten for Module 5 (setup, configuration, a Security page, architecture, tests, API with
+  `db_safety` and `applicant_search`); `sphinx-build -W` is now clean and gated. Done after submission; the Phase 10
+  entry check was not run first.
 - **A10.1** Cruft removed: `github.txt`, `check_llm.py`, `run_llm.sh`, `llm_hosting/all`, `sql/gre_check.sql`,
   `sql/questions_scratch.sql`, `data/applicant_data.json` (nothing reads them; all in git history). `coverage_summary.txt`
   regenerated.

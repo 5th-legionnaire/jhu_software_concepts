@@ -12,13 +12,12 @@ unchanged. Module 5 made the helpers pull_data.py already depended on public
 the page loop in its own function (CHG-15).
 
 Contains:
-    ScrapeWindow, ScrapeOptions : what to scrape, and how
-    scrape_data()               : pull raw result pages from GradCafe and save them
-    build_url(), next_cursor(), page_path()
-                                : URL and file helpers shared with pull_data.py
-    start_browser(), fetch_html()
-                                : the Selenium pieces, injectable in a test
-    save_data()                 : write records to a JSON file
+    ScrapeWindow, ScrapeOptions:   what to scrape, and how
+    scrape_data():                 pull raw result pages from GradCafe and save them
+    build_url():                   the survey URL for a date window and a cursor
+    next_cursor(), page_path():    pagination and file helpers shared with pull_data.py
+    start_browser(), fetch_html(): the Selenium pieces, injectable in a test
+    save_data():                   write records to a JSON file
 
 Turning the saved pages into applicant records is clean.py's job.
 

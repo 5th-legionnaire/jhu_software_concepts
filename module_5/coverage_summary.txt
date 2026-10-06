@@ -25,4 +25,4 @@ src/scrape.py               123      0   100%
 -------------------------------------------------------
 TOTAL                      1050      0   100%
 Required test coverage of 100% reached. Total coverage: 100.00%
-605 passed in 11.84s
+605 passed in 11.70s

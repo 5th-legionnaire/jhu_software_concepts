@@ -1351,6 +1351,15 @@ This list mirrors them.
 
 ### Phase 10 amendments
 
+- **A10.5 The Sphinx docs describe Module 5.** They had stayed Module 4's (release 4.0,
+  `cd module_4`, the old `create_app` signature, no `db_safety` or `applicant_search`). They
+  now cover setup with pip and uv, configuration, the two roles, a new Security and
+  Assurance page, the current architecture and tests, and both new modules in the API
+  reference. Building them strictly (`sphinx-build -W`) exposed invalid reStructuredText in
+  three module docstrings and dataclass fields documented twice; both were fixed, and the
+  Phase 10 gate now fails on any Sphinx warning. This work was done after submission,
+  and the Phase 10 entry check was not run before it began.
+
 - **A10.4 The README was restructured for the reader.** It had grown with the build: a status section that had gone
   stale, a Module 4 checklist, and a Module 4 testing section. It now opens with a table of what to verify and the
   command that verifies it, then how to get the environment running, then the security tooling, CI, tests and

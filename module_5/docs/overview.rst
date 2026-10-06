@@ -5,80 +5,87 @@ What this service does
 ----------------------
 
 Grad Cafe Analytics loads self-reported graduate admissions results into
-PostgreSQL and serves them as an analysis page. The pipeline has five steps:
-**scrape** (render Grad Cafe result pages in Chrome), **clean** (parse the
-saved HTML into applicant records), **load** (insert them into PostgreSQL,
-``ON CONFLICT (p_id) DO NOTHING`` so a repeated pull is a no-op rather than a
-duplicate), **query** (answer nine required questions and two original ones,
-through raw SQL and again through the SQLAlchemy ORM), and **render** (the
-Flask analysis page, read fresh from the database on every request). The
-**Pull Data** and **Update Analysis** buttons on the page trigger the first
-three steps and the last two, respectively.
+PostgreSQL and serves them. The pipeline has five steps: **scrape** (render
+Grad Cafe result pages in Chrome), **clean** (parse the saved HTML into
+applicant records), **load** (insert them, ``ON CONFLICT (p_id) DO NOTHING`` so
+a repeated pull adds nothing twice), **query** (nine required questions and two
+original ones, through composed SQL and again through the SQLAlchemy ORM), and
+**serve** (the Flask analysis page, read fresh on every request, and
+``GET /api/applicants``, a bounded and validated search).
 
 Requirements
 ------------
 
-- Python 3.14.6
-- A running PostgreSQL server (developed against 18.6; any reasonably
-  recent version works, since the schema uses nothing exotic)
-- Chrome, for the scraper, *only* if you intend to run a real Pull Data.
-  No test in the suite launches a browser.
+- Python 3.14 (developed and tested on 3.14.6)
+- PostgreSQL (18.6 locally, 16 in CI)
+- Graphviz, for the dependency graph and one test that regenerates it
+- Chrome, only for a real Pull Data; no test launches a browser
 
-Installation
-------------
+Installation (pip or uv)
+------------------------
+
+Dependencies are declared once, in ``setup.py``. ``requirements.txt`` is a
+fully pinned lock generated from it. Either installer builds the same
+environment; the second command in each is the editable install of the
+project itself, which is what lets the flat modules in ``src/`` import each
+other from anywhere.
 
 .. code-block:: console
 
-   $ cd module_4
-   $ python3 -m venv .venv && source .venv/bin/activate
+   $ cd module_5
+   $ python3.14 -m venv .venv && source .venv/bin/activate     # pip
    $ pip install -r requirements.txt
+   $ pip install -e . --no-deps
 
-Environment variables
----------------------
+   $ uv venv -p 3.14 .venv && source .venv/bin/activate        # or uv
+   $ uv pip sync requirements.txt
+   $ uv pip install -e . --no-deps
 
-The connection settings come from the environment, populated from a ``.env``
-file in ``module_5/`` if one exists (copy ``.env.example``). Both the psycopg
-code in ``load_data.py`` and the SQLAlchemy code in ``models.py`` read them.
-``DB_HOST``, ``DB_PORT``, and ``DB_NAME`` locate the database. ``DB_USER`` and
-``DB_PASSWORD`` are the runtime account the web app and Pull Data use.
-``DB_OWNER_USER`` and ``DB_OWNER_PASSWORD`` are a separate owner account for
-schema setup and the bulk load, kept out of the running app's environment.
+``scripts/fresh_install_check.sh`` proves both recipes from a clean copy.
 
-``DATABASE_URL`` is an optional single-URL override, used by CI and tests. It
-takes precedence over ``DB_*``, and an explicit ``database_url`` argument takes
-precedence over both:
+Configuration
+-------------
+
+Settings come from the environment, from a ``.env`` file in ``module_5/``
+(copy ``.env.example``) or the shell:
+
+.. list-table::
+   :header-rows: 1
+
+   * - Variable
+     - Meaning
+   * - ``DB_HOST``, ``DB_PORT``, ``DB_NAME``
+     - where the database is
+   * - ``DB_USER``, ``DB_PASSWORD``
+     - the runtime account (``gradcafe_app``): the web app and Pull Data
+   * - ``DB_OWNER_USER``, ``DB_OWNER_PASSWORD``
+     - the owner account (``gradcafe_owner``): schema setup and the bulk load
+       only, kept out of the running app's environment
+   * - ``DATABASE_URL``
+     - optional single-URL override; beats ``DB_*``, loses to an explicit
+       ``database_url`` argument
+   * - ``TEST_DATABASE_URL``, ``TEST_ADMIN_DATABASE_URL``
+     - the disposable test database, as the runtime and the owner account
+
+A missing variable raises ``KeyError`` naming the variable and never a value.
+The libpq ``PG*`` variables Module 3 used are not read.
+
+Database setup
+--------------
+
+``sql/roles.sql`` creates the two accounts, ``sql/grants.sql`` gives the
+runtime account ``SELECT`` and ``INSERT`` on ``applicants`` and nothing else,
+and ``sql/migrate_ownership.sql`` moves an existing table under the owner. No
+password is ever given to ``psql``: each is turned into a SCRAM-SHA-256
+verifier by ``scripts/scram_verifier.py`` and passed in the environment. The
+README's "Database setup" section has the exact commands; :doc:`security`
+explains the privileges.
+
+Running
+-------
 
 .. code-block:: console
 
-   $ export DATABASE_URL=postgresql+psycopg://user:pass@localhost:5432/gradcafedb
-
-A bare ``postgresql://`` URL has the ``+psycopg`` driver supplied
-automatically. A password containing ``@``, ``/``, or ``:`` must be
-percent-encoded by whoever sets the variable; the application decodes it
-correctly once it is. A missing ``DB_*`` variable raises ``KeyError`` naming
-the variable and never a value.
-
-The libpq ``PG*`` variables Module 3 used are no longer read. The test suite
-takes its database from ``TEST_DATABASE_URL``, and
-``create_app(database_url=...)`` lets a test override the setting directly,
-which is what keeps a test run from ever reaching a developer's real database
-by accident; see :doc:`testing`.
-
-Running the application
------------------------
-
-.. code-block:: console
-
-   $ python3 src/app.py        # http://127.0.0.1:8080/analysis
-
-Port 8080 rather than Flask's default 5000, which macOS's AirPlay Receiver
-occupies; set ``PORT`` to override.
-
-Running the tests
-------------------
-
-.. code-block:: console
-
-   $ pytest -m "web or buttons or analysis or db or integration"
-
-See :doc:`testing` for markers, fixtures, and test doubles.
+   $ python3 src/app.py        # http://127.0.0.1:8080/analysis  (PORT overrides 8080)
+   $ curl "http://127.0.0.1:8080/api/applicants?limit=5&sort=gpa"
+   $ pytest                    # the whole suite, 100% coverage required

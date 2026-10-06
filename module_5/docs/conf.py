@@ -1,19 +1,21 @@
 """Sphinx configuration for the Grad Cafe Analytics service.
 
-EN 605.256 Modern Software Concepts in Python, Module 4.
+EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
 """
 
 import os
 import sys
 
-# Autodoc imports the application modules, which live one level up in src/.
+# Autodoc imports the application modules, which live one level up in src/. The
+# project's own editable install (pip install -e .) resolves them too; the path
+# entry keeps a docs-only build working without it.
 sys.path.insert(0, os.path.abspath("../src"))
 
 project = "Grad Cafe Analytics"
 author = "Joshua Latz (jlatz1)"
 copyright = "2026, Joshua Latz"
-release = "4.0"
+release = "5.0"
 
 extensions = [
     "sphinx.ext.autodoc",
@@ -45,3 +47,7 @@ exclude_patterns = ["_build", "Thumbs.db", ".DS_Store"]
 
 html_theme = "sphinx_rtd_theme"
 html_static_path = []
+
+# Render a dataclass's "Attributes:" section as fields of the class, so autodoc does not
+# document each attribute twice (once from the docstring, once as a member).
+napoleon_use_ivar = True
