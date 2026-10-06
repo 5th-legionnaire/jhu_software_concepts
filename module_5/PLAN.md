@@ -490,6 +490,24 @@ grouped ones, including `pull_data` and `models._verify_mapping`.
 prove the guard bites, temporarily reintroduce one f-string SQL statement, confirm the gate fails,
 then revert.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A3.1** The plan contradicts itself on `parse_limit`: section 7 says "at most 6 digits", but the Phase 4
+  matrix requires `limit=1000000` (seven digits) to return 200 and clamp to 100. The matrix is the
+  observable behavior, so the cap is **9 digits**. `1000000` clamps, ten digits and longer are rejected,
+  and `int()` never sees a long string.
+- **A3.2** The AST guard exempts `.format()` called on a `sql.SQL(...)` literal. That is psycopg's own
+  composition API, which quotes what it inserts, and the plan requires `sql.SQL` composition. The guard
+  still flags `.format()` on a plain string, and it checks only literal operands of `+` and `%`, so
+  `sql.SQL(...) + sql.SQL(...)` is allowed.
+- **A3.3** `execute_query` refuses a bare string with `TypeError`, enforcing rule 1 at the one executor.
+  Two test helpers that passed strings (`TRUNCATE`, a failing `SELECT`) now pass `sql.SQL`.
+- **A3.4** Constants become bound parameters, including the CASE labels (cast with `CAST(... AS TEXT)`,
+  so PostgreSQL need not infer a bare parameter's type). The formula's own numbers stay literal: `100.0`
+  in a percentage and `0` in `NULLIF`. They are arithmetic, not data, and binding `100.0` would change a
+  NUMERIC result to a float. The parity snapshot confirms every answer is unchanged.
+- **A3.5** The parity test seeds the full 30,000-row dataset (A0.4). Builder snapshots live in
+  `tests/snapshots/m5_query_sql.txt`, rendered by `scripts/render_query_sql.py`.
+
 ### Phase 4: `GET /api/applicants` (CHG-08, CHG-09)
 
 **Entry:** standard. `db_safety` complete.

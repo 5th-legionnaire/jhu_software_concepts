@@ -9,8 +9,13 @@ into a dict. fake_rows gives small, known, hand-checkable results for every
 question.
 """
 
-import pytest
+import re
+from pathlib import Path
 
+import pytest
+from psycopg import sql
+
+import load_data as ld
 import query_data as qd
 from load_data import create_connection, get_db_config, insert_records
 
@@ -109,3 +114,75 @@ def test_main_exits_when_database_is_unreachable(monkeypatch):
     monkeypatch.setattr(qd, "create_connection", lambda config: None)
     with pytest.raises(SystemExit):
         qd.main()
+
+
+# --- Module 5: composed builders (CHG-05) -----------------------------------
+
+SNAPSHOTS = Path(__file__).resolve().parent / "snapshots"
+
+
+def test_builder_snapshots():
+    """The rendered SQL of all eleven builders is pinned, and is what the README quotes.
+
+    Rendered with as_string(None), which needs no connection: the text here is
+    exactly what the driver receives. Regenerate deliberately with
+    scripts/render_query_sql.py when a question's SQL is meant to change.
+    """
+    blocks = []
+    for name, build in qd.QUESTIONS.items():
+        statement, params = build()
+        blocks.append(f"-- {name}\n{statement.as_string(None)}\nparameters: {params}")
+    expected = (SNAPSHOTS / "m5_query_sql.txt").read_text(encoding="utf-8")
+    assert "\n\n".join(blocks) + "\n" == expected
+
+
+@pytest.mark.parametrize("name", sorted(qd.QUESTIONS))
+def test_builders_put_every_value_in_the_parameters_not_the_sql_text(name):
+    """No string literal appears in the statement; every placeholder has a parameter."""
+    statement, params = qd.QUESTIONS[name]()
+    text = statement.as_string(None)
+    assert "'" not in text
+    assert set(re.findall(r"%\((\w+)\)s", text)) == set(params)
+
+
+def test_builders_touch_no_database():
+    """Building needs no connection: they return a Composed and a dict and nothing else."""
+    for build in qd.QUESTIONS.values():
+        statement, params = build()
+        assert isinstance(statement, sql.Composed)
+        assert isinstance(params, dict)
+
+
+def test_execute_is_the_only_call_site_of_cursor_execute():
+    source = Path(qd.__file__).read_text(encoding="utf-8")
+    assert len(re.findall(r"\.execute\(", source)) == 1
+
+
+@pytest.fixture
+def full_dataset_cursor(clean_db, db_url):
+    """A cursor over the whole committed dataset: 30,000 rows, as the Module 4 snapshot used."""
+    connection = create_connection(get_db_config(db_url))
+    insert_records(connection, ld._read_records(ld.DEFAULT_DATA_FILE))
+    with connection.cursor() as cur:
+        yield cur
+    connection.close()
+
+
+def test_parity_with_module_4(full_dataset_cursor):
+    """run_all() over the full dataset equals what Module 4 printed, line for line.
+
+    This is the proof that rewriting the SQL as composed, parameterized,
+    limited builders changed no answer. The snapshot was captured from the
+    frozen module_4 source before any Module 5 change (tests/snapshots).
+    """
+    expected = (SNAPSHOTS / "m4_run_all.txt").read_text(encoding="utf-8").splitlines()
+    assert qd.run_all(full_dataset_cursor) == expected
+
+
+def test_parity_snapshot_is_not_trivially_zero():
+    """The snapshot must exercise Q5, Q7 to Q9, and UQ2, or parity could not catch a broken bind."""
+    text = (SNAPSHOTS / "m4_run_all.txt").read_text(encoding="utf-8")
+    assert "Q5  Fall 2025 acceptance percentage: 47.92% (92 of 192" in text
+    assert "Q7  JHU Masters in Computer Science count: 8" in text
+    assert "Q8  Original-field count: 28" in text
+    assert "Masters, American: 68.64%" in text

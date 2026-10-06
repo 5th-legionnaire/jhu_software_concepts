@@ -27,6 +27,7 @@ import datetime
 import os
 
 import pytest
+from psycopg import sql
 
 # The flat src/ modules resolve through the editable install
 # (pip install -e ., see setup.py), the same way they do in the app and in CI,
@@ -204,7 +205,7 @@ def clean_db(db_url):
             )
         try:
             create_table(connection)
-            execute_query(connection, "TRUNCATE applicants")
+            execute_query(connection, sql.SQL("TRUNCATE applicants"))
         finally:
             connection.close()
 

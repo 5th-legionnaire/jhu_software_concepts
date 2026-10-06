@@ -5,14 +5,17 @@ produced in Module 2 and loads it into a PostgreSQL database
 
 EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
-Written for Module 3; see the README for what Module 4 changed.
+Written for Module 3; see the README for what Modules 4 and 5 changed.
 
 Contains:
     get_db_config():     connection settings for a role, from an explicit URL,
                          DATABASE_URL, or the DB_* variables
     create_connection(): open a connection using those settings, logging a
                          sanitized message on failure
-    execute_query():     run a single statement in its own transaction
+    COLUMNS:             the one list of table columns that the DDL and the INSERT are built from
+    execute_query():     run a single composed statement in its own transaction
+    build_create_table(), build_insert(), build_count():
+                         compose the statements, touching no database
     create_table():      create the applicants table and attach its column descriptions
     insert_records():    load records already in memory, in one transaction
     load_data():         read records back from a JSON file and load them into a PostgreSQL database
@@ -32,6 +35,8 @@ from urllib import parse
 import psycopg
 from psycopg import OperationalError, sql
 from dotenv import load_dotenv
+
+from db_safety import clamp_limit
 
 load_dotenv()
 
@@ -163,14 +168,24 @@ def create_connection(config):
 
 
 def execute_query(connection, query, params=None):
-    """Execute a single query on the given database connection.
+    """Execute a single composed statement on the given database connection.
+
+    ``query`` must be a psycopg ``sql.Composable`` (``sql.SQL``, ``Composed``).
+    A bare string is refused, so a statement cannot reach the driver unless it
+    was built with the composition API (CHG-05). This is the one place the
+    module executes anything.
 
     connection.transaction() commits on success and rolls back on error.
     (In psycopg 3, `with connection:` would close the connection on exit,
     which is not what is wanted here.) The error is re-raised rather than
     swallowed, so a failed CREATE TABLE stops the run instead of surfacing
     later as a confusing insert error.
+
+    Raises:
+        TypeError: when ``query`` is not a ``sql.Composable``.
     """
+    if not isinstance(query, sql.Composable):
+        raise TypeError("execute_query needs a psycopg sql.Composable, not a bare string")
     try:
         with connection.transaction():
             with connection.cursor() as cursor:
@@ -182,30 +197,50 @@ def execute_query(connection, query, params=None):
 
 # Schema
 
-CREATE_APPLICANTS_TABLE = """
-CREATE TABLE IF NOT EXISTS applicants (
-    p_id                      INTEGER PRIMARY KEY,
-    program                   TEXT,
-    comments                  TEXT,
-    date_added                DATE,
-    url                       TEXT UNIQUE,
-    status                    TEXT,
-    term                      TEXT,
-    us_or_international       TEXT,
-    gpa                       FLOAT,
-    gre                       FLOAT,
-    gre_v                     FLOAT,
-    gre_aw                    FLOAT,
-    degree                    TEXT,
-    llm_generated_program     TEXT,
-    llm_generated_university  TEXT,
-    -- Additional columns, not in the assignment schema. Carried over from
-    -- Module 2 so no parsed field is dropped on the way into the database.
-    program_name              TEXT,
-    university                TEXT,
-    decision_date             TEXT
-);
-"""
+TABLE = sql.Identifier("applicants")
+
+# The columns of the applicants table, in order, with their SQL types. The
+# CREATE TABLE statement and the INSERT are both generated from this one tuple
+# (CHG-06), so the two cannot drift apart. The first group is the Module 3
+# assignment schema; the last three are additional columns carried over from
+# Module 2 so no parsed field is dropped on the way into the database.
+COLUMNS = (
+    ("p_id", "INTEGER PRIMARY KEY"),
+    ("program", "TEXT"),
+    ("comments", "TEXT"),
+    ("date_added", "DATE"),
+    ("url", "TEXT UNIQUE"),
+    ("status", "TEXT"),
+    ("term", "TEXT"),
+    ("us_or_international", "TEXT"),
+    ("gpa", "FLOAT"),
+    ("gre", "FLOAT"),
+    ("gre_v", "FLOAT"),
+    ("gre_aw", "FLOAT"),
+    ("degree", "TEXT"),
+    ("llm_generated_program", "TEXT"),
+    ("llm_generated_university", "TEXT"),
+    ("program_name", "TEXT"),
+    ("university", "TEXT"),
+    ("decision_date", "TEXT"),
+)
+COLUMN_NAMES = tuple(name for name, _type in COLUMNS)
+PRIMARY_KEY = COLUMN_NAMES[0]
+
+
+def build_create_table():
+    """Compose CREATE TABLE IF NOT EXISTS for the applicants table.
+
+    Returns:
+        sql.Composed: the statement. No database is touched.
+    """
+    definitions = sql.SQL(", ").join(
+        sql.SQL("{name} {type}").format(name=sql.Identifier(name), type=sql.SQL(column_type))
+        for name, column_type in COLUMNS
+    )
+    return sql.SQL("CREATE TABLE IF NOT EXISTS {table} ({definitions})").format(
+        table=TABLE, definitions=definitions)
+
 
 # Column descriptions, directly from the Module 3 assignment schema.
 # Stored in the catalog via COMMENT ON COLUMN; view with \d+ applicants.
@@ -231,23 +266,34 @@ COLUMN_DESCRIPTIONS = {
     "decision_date": "Date the decision was given, as presented by the site (no year)",
 }
 
-# Named placeholders so the loader can pass one dict per record.
-# ON CONFLICT makes reruns skip rows already loaded instead of duplicating them.
-INSERT_APPLICANT = """
-INSERT INTO applicants (
-    p_id, program, comments, date_added, url, status, term,
-    us_or_international, gpa, gre, gre_v, gre_aw, degree,
-    llm_generated_program, llm_generated_university,
-    program_name, university, decision_date
-) VALUES (
-    %(p_id)s, %(program)s, %(comments)s, %(date_added)s, %(url)s,
-    %(status)s, %(term)s, %(us_or_international)s, %(gpa)s, %(gre)s,
-    %(gre_v)s, %(gre_aw)s, %(degree)s, %(llm_generated_program)s,
-    %(llm_generated_university)s,
-    %(program_name)s, %(university)s, %(decision_date)s
-)
-ON CONFLICT (p_id) DO NOTHING;
-"""
+def build_insert():
+    """Compose the INSERT, with one named placeholder per column.
+
+    Named placeholders let the loader pass one dict per record. ON CONFLICT
+    makes reruns skip rows already loaded instead of duplicating them.
+
+    Returns:
+        sql.Composed: the statement. No database is touched.
+    """
+    return sql.SQL(
+        "INSERT INTO {table} ({columns}) VALUES ({values}) ON CONFLICT ({key}) DO NOTHING"
+    ).format(
+        table=TABLE,
+        columns=sql.SQL(", ").join(sql.Identifier(name) for name in COLUMN_NAMES),
+        values=sql.SQL(", ").join(sql.Placeholder(name) for name in COLUMN_NAMES),
+        key=sql.Identifier(PRIMARY_KEY),
+    )
+
+
+def build_count():
+    """Compose the row count, limited to one output row.
+
+    Returns:
+        tuple[sql.Composed, dict]: the statement and its parameters.
+    """
+    statement = sql.SQL("SELECT COUNT(*) FROM {table} LIMIT {limit}").format(
+        table=TABLE, limit=sql.Placeholder("limit"))
+    return statement, {"limit": clamp_limit(1)}
 
 
 def create_table(connection):
@@ -258,12 +304,12 @@ def create_table(connection):
     take bind parameters, so identifier and text are composed with
     psycopg.sql rather than string formatting.
     """
-    execute_query(connection, CREATE_APPLICANTS_TABLE)
+    execute_query(connection, build_create_table())
     for column, description in COLUMN_DESCRIPTIONS.items():
         execute_query(
             connection,
-            sql.SQL("COMMENT ON COLUMN applicants.{} IS {}").format(
-                sql.Identifier(column), sql.Literal(description)
+            sql.SQL("COMMENT ON COLUMN {table}.{column} IS {text}").format(
+                table=TABLE, column=sql.Identifier(column), text=sql.Literal(description)
             ),
         )
 
@@ -355,8 +401,9 @@ def _read_records(path):
 
 def _count_rows(connection):
     """Return the current number of rows in applicants."""
+    statement, params = build_count()
     with connection.cursor() as cursor:
-        cursor.execute("SELECT COUNT(*) FROM applicants;")
+        cursor.execute(statement, params)
         return cursor.fetchone()[0]
 
 
@@ -390,7 +437,7 @@ def insert_records(connection, records):
     before = _count_rows(connection)
     with connection.transaction():
         with connection.cursor() as cursor:
-            cursor.executemany(INSERT_APPLICANT, rows)
+            cursor.executemany(build_insert(), rows)
     inserted = _count_rows(connection) - before
 
     print(

@@ -10,8 +10,10 @@ load_data()/main() themselves, which nothing else in the suite calls.
 
 import datetime
 import json
+import re
 
 import psycopg
+from psycopg import sql
 import pytest
 
 import load_data as ld
@@ -51,7 +53,7 @@ def test_execute_query_reraises_and_does_not_swallow_the_error(clean_db, db_url)
     connection = ld.create_connection(ld.get_db_config(db_url))
     try:
         with pytest.raises(psycopg.Error):
-            ld.execute_query(connection, "SELECT * FROM no_such_table_xyz;")
+            ld.execute_query(connection, sql.SQL("SELECT * FROM no_such_table_xyz"))
     finally:
         connection.close()
 
@@ -145,3 +147,76 @@ def test_main_creates_the_table_and_loads_the_given_file(
     ld.main()
 
     assert f"{len(fake_rows)} inserted" in capsys.readouterr().out
+
+
+# --- Module 5: composed DDL and INSERT from one column tuple (CHG-06) -------
+
+def test_insert_builder_columns_match_placeholders():
+    """The INSERT's column list and its placeholders come from COLUMNS, in the same order."""
+    text = ld.build_insert().as_string(None)
+    columns = re.search(r'INSERT INTO "applicants" \((.*?)\) VALUES', text).group(1)
+    values = re.search(r"VALUES \((.*?)\) ON CONFLICT", text).group(1)
+
+    names = [name for name, _type in ld.COLUMNS]
+    assert columns.replace('"', "").split(", ") == names
+    assert re.findall(r"%\((\w+)\)s", values) == names
+    assert text.endswith('ON CONFLICT ("p_id") DO NOTHING')
+
+
+def test_record_mapping_covers_exactly_the_table_columns():
+    """The other hand-written column list, _prepare_record, cannot drift from COLUMNS."""
+    assert list(ld._prepare_record({})) == list(ld.COLUMN_NAMES)
+
+
+def test_every_column_has_a_description():
+    assert set(ld.COLUMN_DESCRIPTIONS) == set(ld.COLUMN_NAMES)
+
+
+def test_create_table_builder_renders_every_column_with_its_type():
+    text = ld.build_create_table().as_string(None)
+    assert text.startswith('CREATE TABLE IF NOT EXISTS "applicants" (')
+    for name, column_type in ld.COLUMNS:
+        assert f'"{name}" {column_type}' in text
+    assert "p_id" in text and "INTEGER PRIMARY KEY" in text
+
+
+def test_count_builder_is_limited_and_parameterized():
+    statement, params = ld.build_count()
+    assert statement.as_string(None) == 'SELECT COUNT(*) FROM "applicants" LIMIT %(limit)s'
+    assert params == {"limit": 1}
+
+
+def test_a_hostile_column_name_renders_quoted_not_executable():
+    """Identifier quoting is what stands between a column name and the statement."""
+    hostile = sql.Identifier('gpa"; DROP TABLE x; --')
+    assert hostile.as_string(None) == '"gpa""; DROP TABLE x; --"'
+
+
+def test_execute_query_refuses_a_bare_string():
+    with pytest.raises(TypeError, match="sql.Composable"):
+        ld.execute_query(None, "SELECT 1")
+
+
+def test_execute_query_accepts_a_composed_statement(clean_db, db_url):
+    connection = ld.create_connection(ld.get_db_config(db_url))
+    try:
+        ld.execute_query(connection, sql.SQL("SELECT {value}").format(value=sql.Literal(1)))
+    finally:
+        connection.close()
+
+
+def test_insert_round_trip(clean_db, fake_rows, db_url):
+    """Rows go in through the composed INSERT and come back with their values; a rerun adds none."""
+    connection = ld.create_connection(ld.get_db_config(db_url))
+    try:
+        assert ld.insert_records(connection, fake_rows) == 2
+        assert ld.insert_records(connection, fake_rows) == 0
+        with connection.cursor() as cursor:
+            cursor.execute(sql.SQL("SELECT p_id, program, gpa, degree FROM applicants "
+                                   "ORDER BY p_id LIMIT {limit}").format(limit=sql.Placeholder("n")),
+                           {"n": 10})
+            rows = cursor.fetchall()
+    finally:
+        connection.close()
+    assert rows == [(9000001, "Computer Science, Johns Hopkins University", 3.8, "Masters"),
+                    (9000002, "Electrical Engineering, Stanford University", 3.9, "PhD")]

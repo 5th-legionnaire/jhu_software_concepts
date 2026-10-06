@@ -252,6 +252,26 @@ assert 'Q1' in response.get_data(as_text=True)
             || fail G9 "fresh_install_check.sh failed; see .gate/phase-$1-fresh.log"
         ok G9 "fresh install passes with pip and uv, no .env, no database configured"
         ;;
+    3)
+        # The SQL guard and the parity proof, by name, so a deselected or
+        # renamed test cannot let the phase pass.
+        "$PY" -m pytest --no-cov -p no:cacheprovider \
+            "tests/test_sql_guard.py::test_no_sql_string_building" \
+            "tests/test_query_data.py::test_parity_with_module_4" >"$GATE_DIR/phase-3-exit.log" 2>&1 \
+            || fail G9 "the AST guard or the parity test failed; see .gate/phase-3-exit.log"
+        ok G9 "AST guard reports zero findings and parity with Module 4 holds"
+
+        # The guard must bite: reintroduce an f-string SQL statement, confirm
+        # the guard fails and names the file, then delete it.
+        local probe="src/zz_gate_probe.py" out
+        printf '"""Gate probe; deleted by gate.sh."""\n\n\ndef probe(table):\n    return f"SELECT * FROM {table}"\n' >"$probe"
+        out="$("$PY" -m pytest --no-cov -p no:cacheprovider tests/test_sql_guard.py::test_no_sql_string_building 2>&1)"
+        local probe_rc=$?
+        rm -f "$probe"
+        [ "$probe_rc" -ne 0 ] && echo "$out" | grep -q "zz_gate_probe.py" \
+            || fail G9 "an f-string SQL statement was not caught (the guard does not bite)"
+        ok G9 "guard rejected a reintroduced f-string SQL statement, then the probe was deleted"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

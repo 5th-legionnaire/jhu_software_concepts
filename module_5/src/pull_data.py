@@ -44,6 +44,7 @@ from sqlalchemy import func, select
 
 import clean
 import scrape
+from db_safety import clamp_limit
 from load_data import create_connection, create_table, get_db_config, insert_records
 from models import Applicant, get_session
 
@@ -103,7 +104,8 @@ def _newest_in_database(session_factory):
     """Return (highest p_id, latest date_added) currently in the database."""
     with session_factory() as session:
         return session.execute(
-            select(func.max(Applicant.p_id), func.max(Applicant.date_added))).one()
+            select(func.max(Applicant.p_id), func.max(Applicant.date_added))
+            .limit(clamp_limit(1))).one()
 
 
 def _start_browser():

@@ -1,0 +1,43 @@
+-- q1
+SELECT COUNT(*) FROM "applicants" WHERE LOWER("term") = %(term)s LIMIT %(limit)s
+parameters: {'term': 'fall 2026', 'limit': 1}
+
+-- q2
+SELECT COUNT(*) FILTER (WHERE LOWER("us_or_international") = %(international)s) AS international, COUNT(*) AS classified, 100.0 * COUNT(*) FILTER (WHERE LOWER("us_or_international") = %(international)s) / NULLIF(COUNT(*), 0) AS pct_international FROM "applicants" WHERE "us_or_international" IS NOT NULL AND TRIM("us_or_international") <> %(blank)s LIMIT %(limit)s
+parameters: {'international': 'international', 'blank': '', 'limit': 1}
+
+-- q3
+SELECT AVG("gpa") FILTER (WHERE "gpa" BETWEEN %(gpa_lo)s AND %(gpa_hi)s) AS "avg_gpa", AVG("gre") FILTER (WHERE "gre" BETWEEN %(gre_q_lo)s AND %(gre_q_hi)s) AS "avg_gre_q", AVG("gre_v") FILTER (WHERE "gre_v" BETWEEN %(gre_v_lo)s AND %(gre_v_hi)s) AS "avg_gre_v", AVG("gre_aw") FILTER (WHERE "gre_aw" BETWEEN %(gre_aw_lo)s AND %(gre_aw_hi)s) AS "avg_gre_aw", COUNT("gpa") FILTER (WHERE "gpa" BETWEEN %(gpa_lo)s AND %(gpa_hi)s) AS "n_gpa", COUNT("gre") FILTER (WHERE "gre" BETWEEN %(gre_q_lo)s AND %(gre_q_hi)s) AS "n_gre_q", COUNT("gre_v") FILTER (WHERE "gre_v" BETWEEN %(gre_v_lo)s AND %(gre_v_hi)s) AS "n_gre_v", COUNT("gre_aw") FILTER (WHERE "gre_aw" BETWEEN %(gre_aw_lo)s AND %(gre_aw_hi)s) AS "n_gre_aw", COUNT("gpa") - COUNT("gpa") FILTER (WHERE "gpa" BETWEEN %(gpa_lo)s AND %(gpa_hi)s) AS "x_gpa", COUNT("gre") - COUNT("gre") FILTER (WHERE "gre" BETWEEN %(gre_q_lo)s AND %(gre_q_hi)s) AS "x_gre_q", COUNT("gre_v") - COUNT("gre_v") FILTER (WHERE "gre_v" BETWEEN %(gre_v_lo)s AND %(gre_v_hi)s) AS "x_gre_v", COUNT("gre_aw") - COUNT("gre_aw") FILTER (WHERE "gre_aw" BETWEEN %(gre_aw_lo)s AND %(gre_aw_hi)s) AS "x_gre_aw" FROM "applicants" LIMIT %(limit)s
+parameters: {'gpa_lo': 0.0, 'gpa_hi': 4.0, 'gre_q_lo': 130.0, 'gre_q_hi': 170.0, 'gre_v_lo': 130.0, 'gre_v_hi': 170.0, 'gre_aw_lo': 0.0, 'gre_aw_hi': 6.0, 'limit': 1}
+
+-- q4
+SELECT AVG("gpa"), COUNT("gpa") FROM "applicants" WHERE LOWER("term") = %(term)s AND LOWER("us_or_international") = %(american)s AND "gpa" BETWEEN %(gpa_lo)s AND %(gpa_hi)s LIMIT %(limit)s
+parameters: {'term': 'fall 2026', 'american': 'american', 'gpa_lo': 0.0, 'gpa_hi': 4.0, 'limit': 1}
+
+-- q5
+SELECT COUNT(*) FILTER (WHERE LOWER("status") = %(status)s) AS accepted, COUNT(*) AS total, 100.0 * COUNT(*) FILTER (WHERE LOWER("status") = %(status)s) / NULLIF(COUNT(*), 0) AS pct_accepted FROM "applicants" WHERE LOWER("term") = %(term)s LIMIT %(limit)s
+parameters: {'term': 'fall 2025', 'status': 'accepted', 'limit': 1}
+
+-- q6
+SELECT AVG("gpa"), COUNT("gpa") FROM "applicants" WHERE LOWER("term") = %(term)s AND LOWER("status") = %(status)s AND "gpa" BETWEEN %(gpa_lo)s AND %(gpa_hi)s LIMIT %(limit)s
+parameters: {'term': 'fall 2026', 'status': 'accepted', 'gpa_lo': 0.0, 'gpa_hi': 4.0, 'limit': 1}
+
+-- q7
+SELECT COUNT(*) FROM "applicants" WHERE "program" ~* %(jhu)s AND "program" ~* %(cs)s AND LOWER("degree") = %(masters)s LIMIT %(limit)s
+parameters: {'jhu': 'johns? hopkins|\\mjhu\\M', 'cs': 'computer science', 'masters': 'masters', 'limit': 1}
+
+-- q8
+SELECT COUNT(*) FROM "applicants" WHERE LOWER("term") = %(term)s AND LOWER("status") = %(status)s AND LOWER("degree") = %(phd)s AND "program" ~* %(cs)s AND "program" ~* %(universities)s LIMIT %(limit)s
+parameters: {'term': 'fall 2026', 'status': 'accepted', 'phd': 'phd', 'cs': 'computer science', 'universities': 'georgetown|massachusetts institute of technology|\\mmit\\M|stanford|carnegie mellon|\\mcmu\\M', 'limit': 1}
+
+-- q9
+SELECT COUNT(*) FROM "applicants" WHERE LOWER("term") = %(term)s AND LOWER("status") = %(status)s AND LOWER("degree") = %(phd)s AND "llm_generated_program" ~* %(cs)s AND "llm_generated_university" ~* %(universities)s LIMIT %(limit)s
+parameters: {'term': 'fall 2026', 'status': 'accepted', 'phd': 'phd', 'cs': 'computer science', 'universities': 'georgetown|massachusetts institute of technology|\\mmit\\M|stanford|carnegie mellon|\\mcmu\\M', 'limit': 1}
+
+-- uq1
+SELECT CASE WHEN "gpa" BETWEEN %(gpa_lo)s AND %(gpa_hi)s THEN CAST(%(reported)s AS TEXT) ELSE CAST(%(unreported)s AS TEXT) END AS gpa_reported, COUNT(*) AS entries, COUNT(*) FILTER (WHERE LOWER("status") = %(status)s) AS accepted, 100.0 * COUNT(*) FILTER (WHERE LOWER("status") = %(status)s) / NULLIF(COUNT(*), 0) AS pct_accepted FROM "applicants" WHERE LOWER("term") = %(term)s GROUP BY 1 ORDER BY 1 DESC LIMIT %(limit)s
+parameters: {'term': 'fall 2026', 'status': 'accepted', 'gpa_lo': 0.0, 'gpa_hi': 4.0, 'reported': 'Reported GPA', 'unreported': 'No usable GPA', 'limit': 100}
+
+-- uq2
+SELECT CASE LOWER("degree") WHEN %(phd)s THEN CAST(%(phd_label)s AS TEXT) ELSE CAST(%(masters_label)s AS TEXT) END AS degree_group, CASE LOWER("us_or_international") WHEN %(american)s THEN CAST(%(american_label)s AS TEXT) ELSE CAST(%(international_label)s AS TEXT) END AS nationality, COUNT(*) AS entries, COUNT(*) FILTER (WHERE LOWER("status") = %(status)s) AS accepted, 100.0 * COUNT(*) FILTER (WHERE LOWER("status") = %(status)s) / NULLIF(COUNT(*), 0) AS pct_accepted FROM "applicants" WHERE LOWER("term") = %(term)s AND LOWER("degree") IN (%(phd)s, %(masters)s) AND LOWER("us_or_international") IN (%(american)s, %(international)s) GROUP BY 1, 2 ORDER BY 1 DESC, 2 LIMIT %(limit)s
+parameters: {'term': 'fall 2026', 'status': 'accepted', 'phd': 'phd', 'masters': 'masters', 'american': 'american', 'international': 'international', 'phd_label': 'PhD', 'masters_label': 'Masters', 'american_label': 'American', 'international_label': 'International', 'limit': 100}

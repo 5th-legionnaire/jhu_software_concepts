@@ -21,9 +21,9 @@ This README is a **first pass, written while Module 5 is being built.** The
 build follows [PLAN.md](PLAN.md) in gated phases. Each phase must pass
 `scripts/gate.sh` (tests, 100% coverage, Pylint, secrets scan, Change Register)
 before it is committed, and the [Gate Log](PLAN.md) records each result.
-**Complete as of this commit: Phases 0 to 2** (scaffold and gate tooling;
-packaging and the pinned lock; configuration and secrets). **Not started:**
-SQL composition and `LIMIT`, `GET /api/applicants`, the least-privilege
+**Complete as of this commit: Phases 0 to 3** (scaffold and gate tooling;
+packaging and the pinned lock; configuration and secrets; SQL composition and
+`LIMIT`). **Not started:** `GET /api/applicants`, the least-privilege
 database role, Pylint 10.00/10, the dependency graph, Snyk, the CI workflow,
 and the PDF report. Sections below that describe those are marked *pending*.
 The sections from "Architecture" onward still describe the Module 4 baseline
@@ -161,6 +161,96 @@ revisits them when the SQL is rewritten.
 `tests/test_config.py::test_connection_error_message_is_sanitized` feeds a
 realistic libpq message and asserts that none of its host, address, port, or
 user name appears in the log or on stdout or stderr.
+
+<a id="chg-05"></a>
+
+### CHG-05: SQL is built, then executed, and never assembled from strings
+
+**Problem.** `query_data.py` held its eleven analysis queries as text
+constants, seven of them built with f-strings. The values spliced in were
+constants, so nothing was exploitable, but "constants only" is a policy a
+reviewer cannot verify at a glance, and the assignment forbids f-string SQL
+outright. Construction and execution were also tangled: `_one()` and `_rows()`
+took raw strings.
+
+**Decision.** Each question has a builder, `build_q1()` through `build_uq2()`,
+that returns `(statement, params)`. The statement is a psycopg `sql.Composed`:
+identifiers go through `sql.Identifier`, values through `sql.Placeholder`, and
+static text is a `sql.SQL` literal. A builder touches no database, so the exact
+text is inspectable without a connection (`statement.as_string(None)`), and
+`QUESTIONS` maps every question to its builder. One function, `_execute()`,
+is the only place the module calls `cursor.execute`. Constants became bound
+parameters too: the term, status, degree and nationality values, the GPA and
+GRE ranges, the regular expressions, and even the labels in the `CASE`
+expressions. `load_data.execute_query()` now refuses anything that is not a
+`sql.Composable`.
+
+**Trade-off.** The formula's own numbers stay literal: `100.0` in a
+percentage and `0` in `NULLIF`. They are arithmetic, not data, and binding
+`100.0` would turn a NUMERIC result into a float. The statements are harder to
+read as Python than a SQL string was; `tests/snapshots/m5_query_sql.txt` and
+`scripts/render_query_sql.py` render them back to plain SQL.
+
+**Verified by.** `tests/test_sql_guard.py`: `test_no_sql_string_building` walks
+every `src/*.py` and fails on an f-string, a string `+` or `%`, or `str.format`
+holding SQL, and `test_guard_reports_sql_built_from_strings` shows it does so.
+`test_every_execute_receives_composable` wraps a real cursor in a spy and
+records the type of every statement `run_all` and `insert_records` send.
+`tests/test_query_data.py::test_builder_snapshots` pins the rendered SQL, and
+`::test_parity_with_module_4` runs `run_all` over all 30,000 rows and compares
+it line for line with what Module 4 printed.
+
+<a id="chg-06"></a>
+
+### CHG-06: the INSERT and the DDL are generated from one column tuple
+
+**Problem.** The column list lived twice by hand: in the INSERT text, and in
+the record mapping that feeds it. A column added to one and not the other
+fails silently, as a missing value or an error at the first insert.
+
+**Decision.** `load_data.COLUMNS` lists every column with its SQL type. The
+`CREATE TABLE`, the column names and the placeholders of the `INSERT`, and the
+`ON CONFLICT` target are all composed from it with `sql.Identifier` and
+`sql.Placeholder`. The row count is composed too, and carries a `LIMIT`.
+
+**Trade-off.** The SQL types stay as `sql.SQL` text inside the tuple, since a
+type is syntax and not a value. They are fixed source text, not input.
+
+**Verified by.** `tests/test_load_data.py`:
+`test_insert_builder_columns_match_placeholders`,
+`test_record_mapping_covers_exactly_the_table_columns` (the other hand-written
+list), and `test_insert_round_trip`, which loads rows, reads them back, and
+shows a rerun adds none.
+
+<a id="chg-07"></a>
+
+### CHG-07: every SELECT has a LIMIT, from one definition of "maximum"
+
+**Problem.** No query was bounded. An unbounded read is a resource-exhaustion
+risk the moment any request can influence it, and the assignment requires a
+ceiling.
+
+**Decision.** `src/db_safety.py` defines `MIN_LIMIT`, `MAX_LIMIT` and
+`DEFAULT_LIMIT` as 1, 100 and 20, and `clamp_limit()`. Every statement ends in
+a limit from it: single-row aggregates use `clamp_limit(1)` and grouped
+results `clamp_limit(MAX_LIMIT)`, in the raw SQL, in every ORM statement, and
+in the pull's and the model check's reads. `parse_limit()` and
+`validate_text()` are the boundary for request text, ready for Phase 4: they
+reject what they cannot make safe, and their errors name the field and never
+echo the value.
+
+**Trade-off.** On `SELECT COUNT(*)`, `LIMIT 1` caps the rows *returned*, not
+the rows *evaluated*. A subquery limit would cap evaluation and silently change
+every analysis answer once the table outgrew it, so aggregates get an output
+limit, and the row-returning API gets the enforced 1 to 100 clamp. The parity
+test is what shows no answer changed. See also amendment A3.1.
+
+**Verified by.** `tests/test_db_safety.py`: `test_clamp_boundaries`,
+`test_parse_limit_rejects`, and the text-validation tests.
+`tests/test_sql_guard.py`: `test_every_select_has_limit` for each of the eleven
+builders, `test_every_orm_statement_builder_is_limited`, and
+`test_every_select_the_orm_executes_has_limit`, which captures what SQLAlchemy
+actually sends.
 
 <a id="chg-18"></a>
 
@@ -333,6 +423,27 @@ This list mirrors them.
   pending item marked. The rest of the README, from "Architecture" onward,
   still describes the Module 4 baseline until Phase 10.
 
+### Phase 3 amendments
+
+- **A3.1 The plan contradicted itself on the limit's digit cap.** Section 7
+  says `parse_limit` accepts "at most 6 digits", but the Phase 4 matrix requires
+  `limit=1000000`, which has seven, to return 200 and clamp to 100. The matrix
+  is the behavior a client sees, so the cap is **9 digits**: `1000000` clamps,
+  ten digits and longer are rejected, and `int()` never sees a long string.
+- **A3.2 The guard allows psycopg's own `.format()`.** The AST guard exempts
+  `.format()` called on a `sql.SQL(...)` literal, which is the composition API
+  and quotes what it inserts. It still flags `.format()` on a plain string, and
+  it inspects only literal operands of `+` and `%`, so joining two
+  `sql.SQL` objects is allowed.
+- **A3.3 `execute_query` refuses a bare string.** This enforces rule 1 at the
+  one executor. Two test helpers that passed strings now pass `sql.SQL`.
+- **A3.4 Constants are parameters, except the formula's numbers.** Including the
+  `CASE` labels, which are cast with `CAST(... AS TEXT)` so PostgreSQL need not
+  infer a bare parameter's type. `100.0` and `0` stay literal, since they are
+  arithmetic and not data.
+- **A3.5 Snapshots.** The parity test seeds the full 30,000 rows (A0.4). The
+  rendered SQL of the builders is pinned in `tests/snapshots/m5_query_sql.txt`.
+
 ### Phase 6 amendments, decided in advance
 
 - **A6.1 Compiled-SQL check allows exactly the Phase 3 LIMIT.** Phase 3
@@ -394,8 +505,8 @@ scan run in CI.
 | Packaging | `setup.py` with flat modules; editable install | `setup.py` | done |
 | Reproducible environment | pinned lock, installs with pip and uv | `requirements.txt`, `scripts/` | done |
 | Secrets | `DB_*` variables, `.env.example`, sanitized connection errors | `src/load_data.py`, `.env.example` | done |
-| SQL injection defenses | composed, parameterized SQL | `src/query_data.py`, `src/load_data.py` | pending |
-| `LIMIT` enforcement | every query bounded, maximum enforced | `src/db_safety.py` | pending |
+| SQL injection defenses | composed, parameterized SQL, built apart from execution | `src/query_data.py`, `src/load_data.py` | done for the existing SQL; the endpoint's inputs are Phase 4 |
+| `LIMIT` enforcement | every query bounded, one definition of the maximum | `src/db_safety.py` | done for the existing queries; the endpoint's clamp is Phase 4 |
 | Searchable endpoint | `GET /api/applicants` | `src/applicant_search.py` | pending |
 | Least privilege | owner and runtime roles | `sql/` | pending |
 | Pylint 10.00/10 | fixes in code, no inline disables | `src/` | pending |
@@ -422,12 +533,14 @@ module_5/
 │   ├── models.py               SQLAlchemy Applicant model and session factory
 │   ├── query_data.py           raw SQL analyses and the output formatters
 │   ├── orm_queries.py          the same analyses through the ORM
-│   ├── db_safety.py            query limits and input checks (stub; Phase 3)
+│   ├── db_safety.py            query limits and input checks
 │   ├── applicant_search.py     GET /api/applicants search (stub; Phase 4)
 │   ├── templates/index.html    the analysis page
 │   └── static/style.css        page styles
 ├── tests/                      all test code; conftest.py holds the fixtures
 │   ├── snapshots/              Module 4 answers and compiled SQL, for parity tests
+│   ├── test_db_safety.py       limit clamping and input validation
+│   ├── test_sql_guard.py       no string-built SQL, composed-only, every SELECT limited
 │   ├── test_config.py          configuration and secrets handling
 │   ├── test_packaging.py       packaging and the lock
 │   ├── test_lint_policy.py     every test carries a marker

@@ -34,6 +34,7 @@ import sys
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects import postgresql
 
+from db_safety import MAX_LIMIT, clamp_limit
 from models import Applicant, get_session
 from query_data import (
     CS_PATTERN,
@@ -99,7 +100,7 @@ def _pct(numerator, denominator):
 
 def q1_stmt():
     """Fall 2026 applicant count."""
-    return select(func.count()).select_from(Applicant).where(FALL_2026)
+    return select(func.count()).select_from(Applicant).where(FALL_2026).limit(clamp_limit(1))
 
 
 def q2_stmt():
@@ -111,6 +112,7 @@ def q2_stmt():
         .select_from(Applicant)
         .where(and_(Applicant.us_or_international.is_not(None),
                     func.trim(Applicant.us_or_international) != ""))
+        .limit(clamp_limit(1))
     )
 
 
@@ -125,26 +127,27 @@ def q3_stmt():
     averages = [func.avg(col).filter(col.between(*rng)) for col, rng in metrics]
     included = [func.count(col).filter(col.between(*rng)) for col, rng in metrics]
     excluded = [func.count(col) - func.count(col).filter(col.between(*rng)) for col, rng in metrics]
-    return select(*averages, *included, *excluded).select_from(Applicant)
+    return select(*averages, *included, *excluded).select_from(Applicant).limit(clamp_limit(1))
 
 
 def q4_stmt():
     """Average GPA of American Fall 2026 applicants."""
     return select(func.avg(Applicant.gpa), func.count(Applicant.gpa)).where(
-        and_(FALL_2026, AMERICAN, VALID_GPA))
+        and_(FALL_2026, AMERICAN, VALID_GPA)).limit(clamp_limit(1))
 
 
 def q5_stmt():
     """Fall 2025 acceptance percentage over all Fall 2025 entries."""
     accepted = func.count().filter(ACCEPTED)
     total = func.count()
-    return select(accepted, total, _pct(accepted, total)).select_from(Applicant).where(FALL_2025)
+    return (select(accepted, total, _pct(accepted, total)).select_from(Applicant)
+            .where(FALL_2025).limit(clamp_limit(1)))
 
 
 def q6_stmt():
     """Average GPA of accepted Fall 2026 applicants."""
     return select(func.avg(Applicant.gpa), func.count(Applicant.gpa)).where(
-        and_(FALL_2026, ACCEPTED, VALID_GPA))
+        and_(FALL_2026, ACCEPTED, VALID_GPA)).limit(clamp_limit(1))
 
 
 def q7_stmt():
@@ -152,7 +155,7 @@ def q7_stmt():
     return select(func.count()).select_from(Applicant).where(and_(
         _matches(Applicant.program, JHU_PATTERN),
         _matches(Applicant.program, CS_PATTERN),
-        MASTERS))
+        MASTERS)).limit(clamp_limit(1))
 
 
 def q8_stmt():
@@ -160,7 +163,7 @@ def q8_stmt():
     return select(func.count()).select_from(Applicant).where(and_(
         FALL_2026, ACCEPTED, PHD,
         _matches(Applicant.program, CS_PATTERN),
-        _matches_any(Applicant.program, Q8_UNIVERSITY_PATTERN)))
+        _matches_any(Applicant.program, Q8_UNIVERSITY_PATTERN))).limit(clamp_limit(1))
 
 
 def q9_stmt():
@@ -168,7 +171,7 @@ def q9_stmt():
     return select(func.count()).select_from(Applicant).where(and_(
         FALL_2026, ACCEPTED, PHD,
         _matches(Applicant.llm_generated_program, CS_PATTERN),
-        _matches_any(Applicant.llm_generated_university, Q8_UNIVERSITY_PATTERN)))
+        _matches_any(Applicant.llm_generated_university, Q8_UNIVERSITY_PATTERN))).limit(clamp_limit(1))
 
 
 def uq1_stmt():
@@ -182,6 +185,7 @@ def uq1_stmt():
         .where(FALL_2026)
         .group_by(group)
         .order_by(group.desc())
+        .limit(clamp_limit(MAX_LIMIT))
     )
 
 
@@ -197,6 +201,7 @@ def uq2_stmt():
         .where(and_(FALL_2026, or_(PHD, MASTERS), or_(AMERICAN, INTERNATIONAL)))
         .group_by(degree, nationality)
         .order_by(degree.desc(), nationality)
+        .limit(clamp_limit(MAX_LIMIT))
     )
 
 
@@ -281,7 +286,7 @@ def fetch_one(session):
     section asks for: proof that a row can be read back with the right
     shape, independent of any analysis. Returns None if the table is empty.
     """
-    applicant = session.scalars(select(Applicant).order_by(Applicant.p_id).limit(1)).first()
+    applicant = session.scalars(select(Applicant).order_by(Applicant.p_id).limit(clamp_limit(1))).first()
     return applicant_dict(applicant) if applicant else None
 
 
@@ -289,7 +294,7 @@ def dataset_summary(session):
     """Total entries and the range of date_added, for the page header."""
     total, first, last = session.execute(
         select(func.count(), func.min(Applicant.date_added), func.max(Applicant.date_added))
-        .select_from(Applicant)).one()
+        .select_from(Applicant).limit(clamp_limit(1))).one()
     return {"total": total, "first_added": first, "last_added": last}
 
 

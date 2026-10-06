@@ -30,6 +30,7 @@ from sqlalchemy import Date, Engine, Float, Integer, Text, URL, create_engine, f
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
 
+from db_safety import clamp_limit
 from load_data import get_db_config
 
 # psycopg 3. A bare "postgresql://" URL sends SQLAlchemy looking for psycopg2,
@@ -161,8 +162,8 @@ def _verify_mapping():
     print("Model matches the table.")
 
     with get_session() as session:
-        total = session.scalar(select(func.count()).select_from(Applicant))
-        newest = session.scalars(select(Applicant).order_by(Applicant.p_id.desc()).limit(1)).first()
+        total = session.scalar(select(func.count()).select_from(Applicant).limit(clamp_limit(1)))
+        newest = session.scalars(select(Applicant).order_by(Applicant.p_id.desc()).limit(clamp_limit(1))).first()
     print(f"Rows via ORM: {total:,}")
     print(f"Newest entry: {newest!r}")
 
