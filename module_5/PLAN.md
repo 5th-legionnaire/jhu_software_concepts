@@ -317,7 +317,7 @@ module_5/
 - **A0.8** `CHANGES.md` adds a Status column. A row with no test reference must say `Evidence:`.
 - **A0.9** The `tests/conftest.py` byline was also updated to Module 5, because the file is edited here.
 
-### Phase 1: Packaging and reproducible environment (CHG-01, CHG-02)
+### Phase 1: Packaging and reproducible environment (CHG-01, CHG-02) (COMPLETE)
 
 **Entry:** standard. `uv --version` works.
 
@@ -803,3 +803,4 @@ Appended by `gate.sh` at each phase exit.
 |---|---|---|---|---|---|---|
 | baseline | 2026-10-05 | 1ecf2c9 | 102 | 100% | 8.36 | module_4 HEAD |
 | 0 | 2026-10-05 20:06 | 13acd9f | 107 | 100.00% | 8.30 | Scaffold, snapshots, gate tooling, CHG-18. Pylint baseline 8.30 measured (plan said 8.36); amendments A0.1 to A0.9. |
+| 1 | 2026-10-05 20:34 | 2bd7d2b | 114 | 100.00% | 8.30 | setup.py, universal 70-pin lock, editable install, fresh install with pip and uv; amendments A1.1 to A1.5. |
