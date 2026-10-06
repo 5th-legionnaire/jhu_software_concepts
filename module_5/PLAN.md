@@ -732,7 +732,7 @@ draft is stored in `report/` for Phase 10.
   claims (hub, shared leaf, no cycles) from the edges.
 - **A7.5** BeautifulSoup lies beyond the two-import depth and is not drawn.
 
-### Phase 8: Snyk (required plus extra credit)
+### Phase 8: Snyk (required plus extra credit) (COMPLETE)
 
 **Entry:** standard, plus track A done: `snyk whoami` succeeds, Snyk Code is enabled, and
 `gh secret list` shows `SNYK_TOKEN`.
@@ -944,3 +944,4 @@ Appended by `gate.sh` at each phase exit.
 | 5 | 2026-10-05 22:28 | c65c87c | 509 | 100.00% | 8.68 | Least-privilege roles, SCRAM verifiers, permanent credential leak check, privileges.txt and privileges.png; real DB migrated; amendments A5.1 to A5.11. |
 | 6 | 2026-10-05 22:37 | 2b50373 | 549 | 100.00% | 10.00 | Pylint 10.00/10 with no disables, stuck-busy fix, scrape and ORM refactors, compiled SQL and answer parity held; amendments A6.1 to A6.7. |
 | 7 | 2026-10-05 22:43 | e6366d7 | 563 | 100.00% | 10.00 | dependency.svg with collapsed packages, 7-sentence explanation verified against the edges, graph regeneration tests; amendments A7.1 to A7.5. |
+| 8 | 2026-10-05 22:59 | 68e107a | 588 | 100.00% | 10.00 | Snyk: 22 findings fixed by upgrading urllib3 and python-dotenv, 70 packages scanned, Snyk Code triaged (1 LOW accepted), CHG-21; amendments A8.1 to A8.8. |
