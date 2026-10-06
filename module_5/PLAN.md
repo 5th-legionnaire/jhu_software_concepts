@@ -508,7 +508,7 @@ then revert.
 - **A3.5** The parity test seeds the full 30,000-row dataset (A0.4). Builder snapshots live in
   `tests/snapshots/m5_query_sql.txt`, rendered by `scripts/render_query_sql.py`.
 
-### Phase 4: `GET /api/applicants` (CHG-08, CHG-09)
+### Phase 4: `GET /api/applicants` (CHG-08, CHG-09) (COMPLETE)
 
 **Entry:** standard. `db_safety` complete.
 
@@ -861,3 +861,4 @@ Appended by `gate.sh` at each phase exit.
 | 1 | 2026-10-05 20:34 | 2bd7d2b | 114 | 100.00% | 8.30 | setup.py, universal 70-pin lock, editable install, fresh install with pip and uv; amendments A1.1 to A1.5. |
 | 2 | 2026-10-05 21:53 | a00ebfa | 189 | 100.00% | 8.31 | DB_* config with roles, sanitized connection errors, .env.example, TEST_DATABASE_URL pulled forward, README first pass; amendments A2.1 to A2.8. |
 | 3 | 2026-10-05 22:01 | 48b2a49 | 333 | 100.00% | 8.52 | Composed SQL, LIMIT everywhere, db_safety, parity with Module 4 over 30,000 rows; amendments A3.1 to A3.5. |
+| 4 | 2026-10-05 22:08 | 439845e | 443 | 100.00% | 8.68 | GET /api/applicants, Services seam, 51-case malicious-input matrix, live curl spot-checks; amendments A4.1 to A4.8. |
