@@ -570,6 +570,19 @@ projection columns.
 **Exit:** standard gate plus: every row of the matrix is a parametrized test case (count them).
 Two cases are spot-checked with `curl` against the running app.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A4.1** Every plan matrix row is a parametrized case in `test_sqli_malicious.py` (51 tests in all), plus
+  extra cases for each sort column, combined filters, ordering, ISO dates, and right-to-left text.
+- **A4.2** `SearchFilters` keeps the text filters in one read-only `text` mapping: seven fields exceeded
+  Pylint's attribute limit, and D6 forbids a disable.
+- **A4.3** The LIKE `ESCAPE` character is a bound parameter, so the SQL text holds no quote character.
+- **A4.4** The projection excludes `comments` (free text a client could bulk-read); the plan left it open.
+- **A4.5** `requested_limit` is echoed only after the digits-only check.
+- **A4.6** The `curl` spot-checks ran read-only against the real local database (30,019 rows, untouched).
+- **A4.7** Known gap until CHG-10 (Phase 6): only an unreachable database maps to 503; another database
+  error is a bare 500.
+- **A4.8** The Phase 3 spy and LIMIT guard tests now cover `search_applicants` and the search statement.
+
 ### Phase 5: Least-privilege database (CHG-11, CHG-12, CHG-13)
 
 **Entry:** standard. Local superuser access confirmed (track B). `psql --version` works.

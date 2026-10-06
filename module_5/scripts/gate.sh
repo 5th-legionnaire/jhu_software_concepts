@@ -272,6 +272,25 @@ assert 'Q1' in response.get_data(as_text=True)
             || fail G9 "an f-string SQL statement was not caught (the guard does not bite)"
         ok G9 "guard rejected a reintroduced f-string SQL statement, then the probe was deleted"
         ;;
+    4)
+        # The matrix is parametrized, not a handful of hand-written cases.
+        local matrix
+        matrix="$("$PY" -m pytest tests/test_sqli_malicious.py --collect-only --no-cov -p no:cacheprovider 2>/dev/null | grep -c "::")"
+        [ "$matrix" -ge 45 ] || fail G9 "the malicious-input matrix has only $matrix cases (expected at least 45)"
+        ok G9 "malicious-input matrix: $matrix parametrized cases"
+
+        # The route exists and answers JSON, from a cleared environment.
+        env -i HOME="$HOME" PATH="$PATH" PYTHONPATH=src "$PY" -c "
+from app import create_app
+client = create_app(testing=True).test_client()
+response = client.get('/api/applicants?limit=1000000')
+body = response.get_json()
+assert response.status_code == 200, response.status_code
+assert body['limit'] == 100 and body['clamped'] is True and body['count'] <= 100, body
+assert client.get('/api/applicants?debug=1').status_code == 400
+" >/dev/null 2>&1 || fail G9 "GET /api/applicants did not clamp and reject as specified"
+        ok G9 "GET /api/applicants clamps a huge limit and rejects an unknown parameter"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

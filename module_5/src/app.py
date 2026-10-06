@@ -3,25 +3,28 @@ app.py: Flask application that displays the Grad Cafe analysis.
 
 EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
-Written for Module 3; see the README for what Module 4 changed.
+Written for Module 3; see the README for what Modules 4 and 5 changed.
 
 Contains:
+    Services:             the injectable dependencies, with the real ones as defaults
     PullState:            whether a pull is running, and how the last one ended
     run_inline():         run a pull in the request that asked for it
     run_in_background():  run a pull on a daemon thread
     make_query():         the default page read, through the ORM
     make_scraper():       the default scraper, the real Grad Cafe pull
     make_loader():        the default loader, writing to PostgreSQL
+    make_search():        the default applicant search, through psycopg
     build_sections():     turns query results into display-ready sections
     create_app():         application factory
     index():              the analysis page (routes "/analysis" and "/")
     pull():               Pull Data (route "/pull-data", POST)
     update():             Update Analysis (route "/update-analysis", POST)
+    applicants():         the JSON search (route "/api/applicants", GET)
 
-Every outward dependency reaches the application as an argument to
-create_app(), and every default is the real implementation, so running
+Every outward dependency reaches the application in one Services object passed
+to create_app(), and every default is the real implementation, so running
 `python3 src/app.py` behaves as it did in Module 3. A test passes a fake scraper,
-loader, or query instead, and reaches no network and no database.
+loader, query, or search instead, and reaches no network and no database.
 
 The two buttons answer JSON rather than redirecting, which is what lets a
 caller see a result rather than a 302:
@@ -32,6 +35,10 @@ caller see a result rather than a 302:
                            500 {"ok": false, "error": text}  stopped, nothing written
     POST /update-analysis  200 {"ok": true, "total": n}
                            409 {"busy": true}
+                           503 {"ok": false, "error": text}  database unreachable
+    GET /api/applicants    200 {"ok": true, "limit": n, "requested_limit": text, "clamped": bool,
+                                "sort": column, "order": "asc" | "desc", "count": n, "rows": [...]}
+                           400 {"ok": false, "error": text}  rejected before any query exists
                            503 {"ok": false, "error": text}  database unreachable
 
 Busy state is a plain attribute on PullState, which the page reads and a test
@@ -49,11 +56,16 @@ Usage (from module_5/):
 
 import os
 import threading
+from dataclasses import dataclass, replace
 from datetime import datetime
+from typing import Callable, Optional
 
-from flask import Flask, jsonify, render_template
+import psycopg
+from flask import Flask, jsonify, render_template, request
 from sqlalchemy.exc import SQLAlchemyError
 
+from applicant_search import DatabaseUnavailable, parse_search_args, search_applicants
+from db_safety import InputError
 from load_data import create_connection, get_db_config
 from models import make_session_factory
 from orm_queries import all_results, dataset_summary
@@ -65,6 +77,31 @@ THIN_SHARE = 0.05
 
 DB_UNREACHABLE = ("The database could not be reached. Check that PostgreSQL is running and "
                   "that the DB_* settings in .env, or DATABASE_URL, are correct, then try again.")
+
+
+@dataclass(frozen=True)
+class Services:
+    """The dependencies create_app() wires into the routes.
+
+    Every field is optional. A field left as None is replaced by the real
+    implementation, so a test names only what it fakes. One typed object
+    replaces five keyword arguments (CHG-09): adding the search as a sixth
+    would have made create_app an unbounded argument list.
+
+    Attributes:
+        scraper: callable returning applicant records.
+        loader: callable taking records and returning the number inserted.
+        query: callable returning {"summary": ..., "results": ...} for the page.
+        runner: callable taking the pull job and returning its result, or None
+            when the job was started in the background.
+        search: callable taking validated SearchFilters and returning rows.
+    """
+
+    scraper: Optional[Callable] = None
+    loader: Optional[Callable] = None
+    query: Optional[Callable] = None
+    runner: Optional[Callable] = None
+    search: Optional[Callable] = None
 
 
 class PullState:
@@ -267,6 +304,35 @@ def build_sections(r, total):
     ], total)
 
 
+def make_search(database_url=None):
+    """Build the default applicant search: a short-lived psycopg connection per request.
+
+    Raises, when called, DatabaseUnavailable if the database cannot be reached.
+    """
+    def search(filters):
+        connection = create_connection(get_db_config(database_url))
+        if connection is None:
+            raise DatabaseUnavailable("the database could not be reached")
+        try:
+            with connection.cursor() as cursor:
+                return search_applicants(cursor, filters)
+        finally:
+            connection.close()
+    return search
+
+
+def with_defaults(services, session_factory, database_url, testing):
+    """Return ``services`` with every unset field replaced by the real implementation."""
+    return replace(
+        services,
+        scraper=services.scraper or make_scraper(session_factory),
+        loader=services.loader or make_loader(database_url),
+        query=services.query or make_query(session_factory),
+        runner=services.runner or (run_inline if testing else run_in_background),
+        search=services.search or make_search(database_url),
+    )
+
+
 def _pull_result_text(inserted):
     """What the page says about a pull that finished without error."""
     if inserted == 0:
@@ -275,26 +341,20 @@ def _pull_result_text(inserted):
             "Click Update Analysis to see them in the results.")
 
 
-def create_app(scraper=None, loader=None, query=None, runner=None,
-               database_url=None, testing=False):
+def create_app(services=None, *, database_url=None, testing=False):
     """Build and configure the Flask application.
 
-    Every argument defaults to the real implementation, so running
-    `python3 src/app.py` is unchanged from Module 3. Tests pass fakes instead;
-    this factory is the seam the whole Module 4 suite hangs on.
+    Every dependency defaults to the real implementation, so running
+    `python3 src/app.py` is unchanged from Module 3. Tests pass a Services
+    object with fakes; this factory is the seam the whole suite hangs on.
 
     Args:
-        scraper: callable returning applicant records. Defaults to the real
-            Grad Cafe scraper.
-        loader: callable taking records and returning the number inserted.
-            Defaults to the real PostgreSQL loader.
-        query: callable returning {"summary": ..., "results": ...} for the
-            page. Defaults to reading PostgreSQL through the ORM.
-        runner: callable taking the pull job and returning its result, or None
-            when the job was started in the background. Defaults to
-            run_inline when testing, run_in_background otherwise.
-        database_url: the database the default query and loader should use.
-            Falls back to DATABASE_URL, then to the DB_* variables.
+        services: a Services naming the dependencies to replace. Fields left
+            as None get the real implementation: the Grad Cafe scraper, the
+            PostgreSQL loader, the ORM page read, a background (or, when
+            testing, inline) runner, and the psycopg applicant search.
+        database_url: the database the default query, loader, and search should
+            use. Falls back to DATABASE_URL, then to the DB_* variables.
         testing: sets Flask's TESTING config and selects the inline runner.
 
     Returns:
@@ -304,10 +364,9 @@ def create_app(scraper=None, loader=None, query=None, runner=None,
     app.config["TESTING"] = testing
 
     session_factory = make_session_factory(database_url)
-    scraper = scraper or make_scraper(session_factory)
-    loader = loader or make_loader(database_url)
-    query = query or make_query(session_factory)
-    runner = runner or (run_inline if testing else run_in_background)
+    services = with_defaults(services or Services(), session_factory, database_url, testing)
+    scraper, loader, query = services.scraper, services.loader, services.query
+    runner, search = services.runner, services.search
 
     # Exposed on config so a test can set state.busy directly and so the
     # routes share one object rather than a module-level global.
@@ -377,6 +436,22 @@ def create_app(scraper=None, loader=None, query=None, runner=None,
             pull_running=state.busy,
             pull_status=state.last,
         )
+
+    @app.get("/api/applicants")
+    def applicants():
+        """Search applicants. Invalid input is refused before any query exists."""
+        try:
+            filters = parse_search_args(request.args)
+        except InputError as error:
+            return jsonify(ok=False, error=str(error)), 400
+        try:
+            rows = search(filters)
+        except (DatabaseUnavailable, psycopg.OperationalError):
+            app.logger.exception("Applicant search could not reach the database")
+            return jsonify(ok=False, error=DB_UNREACHABLE), 503
+        return jsonify(ok=True, limit=filters.limit, requested_limit=filters.requested_limit,
+                       clamped=filters.clamped, sort=filters.sort, order=filters.order,
+                       count=len(rows), rows=rows), 200
 
     # Module 3 served the page at the root and the rubric names /analysis, so
     # both reach the same view rather than one of them 404ing.

@@ -21,7 +21,9 @@ import pytest
 from psycopg import sql
 from sqlalchemy import event
 from sqlalchemy.dialects import postgresql
+from werkzeug.datastructures import MultiDict
 
+import applicant_search
 import db_safety
 import load_data as ld
 import models
@@ -203,6 +205,17 @@ def test_every_execute_receives_composable(spy_connection, fake_rows):
 
 
 @pytest.mark.db
+def test_search_applicants_executes_a_composable(spy_connection):
+    """The search endpoint's statement is composed too, with hostile values among its filters."""
+    connection, seen = spy_connection
+    filters = applicant_search.parse_search_args(
+        MultiDict([("term", "' OR '1'='1"), ("q", "100%"), ("sort", "gpa")]))
+    with connection.cursor() as cursor:
+        applicant_search.search_applicants(cursor, filters)
+    assert len(seen) == 1 and non_composable(seen) == []
+
+
+@pytest.mark.db
 def test_create_table_and_count_receive_composables(spy_connection):
     connection, seen = spy_connection
     ld.create_table(connection)
@@ -220,6 +233,15 @@ def test_every_select_has_limit(name):
     assert text.endswith("LIMIT %(limit)s")
     assert len(re.findall(r"\bLIMIT\b", text)) == 1
     assert db_safety.MIN_LIMIT <= params["limit"] <= db_safety.MAX_LIMIT
+
+
+def test_the_search_statement_has_a_bound_limit_in_the_permitted_range():
+    """Whatever the request, the search ends in LIMIT %(limit)s with a value from 1 to 100."""
+    for query in ([], [("limit", "1000000")], [("limit", "-5")], [("q", "x"), ("term", "y")]):
+        filters = applicant_search.parse_search_args(MultiDict(query))
+        statement, params = applicant_search.build_search(filters)
+        assert statement.as_string(None).endswith("LIMIT %(limit)s")
+        assert db_safety.MIN_LIMIT <= params["limit"] <= db_safety.MAX_LIMIT
 
 
 def test_every_question_is_covered_by_the_limit_check():

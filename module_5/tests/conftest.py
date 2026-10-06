@@ -32,7 +32,7 @@ from psycopg import sql
 # The flat src/ modules resolve through the editable install
 # (pip install -e ., see setup.py), the same way they do in the app and in CI,
 # so nothing here edits sys.path (CHG-01).
-from app import create_app
+from app import Services, create_app
 from load_data import create_connection, create_table, execute_query, get_db_config
 from models import make_session_factory
 
@@ -228,8 +228,8 @@ def app(fake_scraper, fake_loader, fake_query, db_url):
     it, so that if a fake were ever removed by mistake the app would still
     point at the disposable test database rather than a developer's real one.
     """
-    return create_app(scraper=fake_scraper, loader=fake_loader, query=fake_query,
-                       database_url=db_url, testing=True)
+    services = Services(scraper=fake_scraper, loader=fake_loader, query=fake_query)
+    return create_app(services, database_url=db_url, testing=True)
 
 
 @pytest.fixture
@@ -249,7 +249,7 @@ def db_client(fake_scraper, clean_db, db_url):
     actual rows. clean_db is requested (and otherwise unused here) so its
     truncation runs before this app is built.
     """
-    app = create_app(scraper=fake_scraper, database_url=db_url, testing=True)
+    app = create_app(Services(scraper=fake_scraper), database_url=db_url, testing=True)
     return app.test_client()
 
 

@@ -21,9 +21,9 @@ This README is a **first pass, written while Module 5 is being built.** The
 build follows [PLAN.md](PLAN.md) in gated phases. Each phase must pass
 `scripts/gate.sh` (tests, 100% coverage, Pylint, secrets scan, Change Register)
 before it is committed, and the [Gate Log](PLAN.md) records each result.
-**Complete as of this commit: Phases 0 to 3** (scaffold and gate tooling;
+**Complete as of this commit: Phases 0 to 4** (scaffold and gate tooling;
 packaging and the pinned lock; configuration and secrets; SQL composition and
-`LIMIT`). **Not started:** `GET /api/applicants`, the least-privilege
+`LIMIT`; the search endpoint). **Not started:** the least-privilege
 database role, Pylint 10.00/10, the dependency graph, Snyk, the CI workflow,
 and the PDF report. Sections below that describe those are marked *pending*.
 The sections from "Architecture" onward still describe the Module 4 baseline
@@ -252,6 +252,78 @@ builders, `test_every_orm_statement_builder_is_limited`, and
 `test_every_select_the_orm_executes_has_limit`, which captures what SQLAlchemy
 actually sends.
 
+<a id="chg-08"></a>
+
+### CHG-08: a search endpoint gives the defenses something to defend
+
+**Problem.** The application accepted no input that reached SQL, so the
+assignment's controls (parameters, identifier quoting, a limit ceiling,
+malicious-input handling) had nothing to apply to.
+
+**Decision.** `GET /api/applicants` is the smallest surface that exercises all
+of them: read-only, a fixed projection, and a strict parameter set.
+
+| Parameter | Rule | Bad input |
+| --- | --- | --- |
+| `limit` | digits only, at most 9; clamped to 1 to 100; default 20; the response reports the effective value | `400` |
+| `sort` | one of `p_id`, `date_added`, `gpa`, `gre`, `gre_v`, `gre_aw`, `term`, `status`, `degree`; reaches SQL through `sql.Identifier`; default `date_added` | `400` |
+| `order` | `asc` or `desc`, looked up in a table of two fixed fragments; default `desc` | `400` |
+| `term`, `status`, `degree`, `nationality` | at most 64 characters, no control characters; `LOWER(column) = LOWER(%(value)s)` | `400` |
+| `q` | at most 100 characters; `program ILIKE %(q)s ESCAPE %(escape)s`, with `\`, `%` and `_` escaped in the value so a client's wildcards match themselves | `400` |
+| anything else | rejected, so the surface stays enumerable; the error lists the allowed names and does not echo the unknown one | `400` |
+
+The first value of a repeated parameter wins. Rows come back as `p_id`,
+`program`, `date_added`, `url`, `status`, `term`, `us_or_international`, `gpa`,
+`gre`, `gre_v`, `gre_aw`, `degree`, `llm_generated_program` and
+`llm_generated_university`; free-text `comments` are deliberately left out.
+Results are ordered by `{sort} {order} NULLS LAST, p_id {order}`.
+
+```text
+200 {"ok": true, "limit": 100, "requested_limit": "1000000", "clamped": true,
+     "sort": "p_id", "order": "desc", "count": 100, "rows": [...]}
+400 {"ok": false, "error": "sort must be one of: p_id, date_added, ..."}
+503 {"ok": false, "error": "The database could not be reached. ..."}
+```
+
+The work is in three steps that never mix, in `src/applicant_search.py`:
+`parse_search_args()` validates request text into a frozen `SearchFilters`,
+`build_search()` composes the statement with no database, and
+`search_applicants()` executes it. A rejected request never builds a statement.
+
+**Trade-off.** Every error message names the field and the rule but never the
+value, so a developer must read the request to see what was wrong. Nothing
+else reaches the client: an unexpected database error is not caught here (see
+A4.7).
+
+**Verified by.** `tests/test_applicant_search.py` (offline): every `400` path,
+run through the real route with a search that fails the test if it is called;
+builder snapshots; a hostile identifier forced past the whitelist renders
+quoted. `tests/test_sqli_malicious.py` (database): 51 cases, each also
+asserting the status is not `500`, the table still holds every seeded row, and
+every returned row has exactly the projection's columns.
+
+<a id="chg-09"></a>
+
+### CHG-09: `create_app` takes one `Services` object
+
+**Problem.** `create_app` had five keyword arguments for its injected
+dependencies. The search made a sixth, and an argument list that grows with
+every dependency is a function nobody can call from memory. Pylint also
+counts it (`too-many-arguments`).
+
+**Decision.** `create_app(services=None, *, database_url=None, testing=False)`.
+`Services` is a frozen dataclass of `scraper`, `loader`, `query`, `runner` and
+`search`, every one optional. A field left unset becomes the real
+implementation, in one place, `with_defaults()`. A test names only what it
+fakes: `create_app(Services(search=fake), testing=True)`.
+
+**Trade-off.** Every existing call site had to change from keyword arguments to
+a `Services(...)`. `create_app()` with no arguments, which is how
+`python3 src/app.py` and Module 3 call it, is unchanged.
+
+**Verified by.** `tests/test_flask_page.py::test_services_default_to_real_implementations`,
+`::test_services_override_is_used`, `::test_services_is_frozen_and_every_field_is_optional`.
+
 <a id="chg-18"></a>
 
 ### CHG-18: The whole suite runs, and an unmarked test stops it
@@ -444,6 +516,35 @@ This list mirrors them.
 - **A3.5 Snapshots.** The parity test seeds the full 30,000 rows (A0.4). The
   rendered SQL of the builders is pinned in `tests/snapshots/m5_query_sql.txt`.
 
+### Phase 4 amendments
+
+- **A4.1 The matrix is covered and then some.** Each row of the plan's
+  malicious-input table is a parametrized case in `tests/test_sqli_malicious.py`,
+  and the file adds cases for every whitelisted sort column, case-insensitive
+  and combined filters, ordering, ISO dates, and right-to-left text.
+- **A4.2 `SearchFilters` holds its text filters in one mapping.** Seven
+  separate fields exceeded Pylint's attribute limit, and decision D6 rules out a
+  disable or a relaxed config, so `term`, `status`, `degree`, `nationality` and
+  `q` live in a read-only `text` mapping. A filter that was absent or empty is
+  simply not in it.
+- **A4.3 The LIKE escape character is a bound parameter,** not a literal in the
+  SQL text, so the statement still contains no quote character.
+- **A4.4 The projection leaves out `comments`.** The plan said "a fixed
+  projection" without listing it. Free-text comments are the one column a client
+  could use to bulk-read user-written text, and no sort or filter needs them.
+- **A4.5 `requested_limit` is echoed only after it passes the digits-only
+  check,** so reporting it cannot reflect hostile text.
+- **A4.6 The live spot-checks ran read-only against the real local database.**
+  `limit=1000000` returned `200` with `limit` 100 and `clamped` true,
+  `term=' OR '1'='1` returned `200` with no rows, and `sort=gpa; DROP TABLE
+  applicants` returned `400`. The table still held all 30,019 rows afterwards.
+- **A4.7 A known gap, closed in Phase 6.** Only an unreachable database is
+  mapped to `503`. Any other database error, such as a privilege error, would be
+  a bare `500` until CHG-10 adds a JSON error handler.
+- **A4.8 The Phase 3 guard tests now cover the search.** The spy proves
+  `search_applicants` hands the driver a composable, and the limit check covers
+  the search statement under hostile limits.
+
 ### Phase 6 amendments, decided in advance
 
 - **A6.1 Compiled-SQL check allows exactly the Phase 3 LIMIT.** Phase 3
@@ -473,9 +574,11 @@ the rest name the phase that produces them.
 - [x] **`pytest.ini`**, [pytest.ini](pytest.ini).
 - [x] **Fresh install by pip and by uv** (Phase 1), proved by
       `scripts/fresh_install_check.sh`; see [Fresh Install](#fresh-install).
-- [ ] **SQL injection defenses**: composed SQL, parameters, separated
-      construction and execution (Phases 3 and 4).
-- [ ] **`LIMIT` on every query, with an enforced maximum** (Phases 3 and 4).
+- [x] **SQL injection defenses** (Phases 3 and 4): composed SQL, bound
+      parameters, construction separated from execution; see
+      [CHG-05](#chg-05) and [CHG-08](#chg-08).
+- [x] **`LIMIT` on every query, with an enforced maximum** (Phases 3 and 4);
+      see [CHG-07](#chg-07).
 - [ ] **Least-privilege database role** (Phase 5), with `privileges.png`.
 - [ ] **10/10 Pylint evidence**, `pylint_report.txt` (Phase 6). The command is
       documented under [Security tooling](#security-tooling).
@@ -505,9 +608,9 @@ scan run in CI.
 | Packaging | `setup.py` with flat modules; editable install | `setup.py` | done |
 | Reproducible environment | pinned lock, installs with pip and uv | `requirements.txt`, `scripts/` | done |
 | Secrets | `DB_*` variables, `.env.example`, sanitized connection errors | `src/load_data.py`, `.env.example` | done |
-| SQL injection defenses | composed, parameterized SQL, built apart from execution | `src/query_data.py`, `src/load_data.py` | done for the existing SQL; the endpoint's inputs are Phase 4 |
-| `LIMIT` enforcement | every query bounded, one definition of the maximum | `src/db_safety.py` | done for the existing queries; the endpoint's clamp is Phase 4 |
-| Searchable endpoint | `GET /api/applicants` | `src/applicant_search.py` | pending |
+| SQL injection defenses | composed, parameterized SQL, built apart from execution | `src/query_data.py`, `src/load_data.py`, `src/applicant_search.py` | done |
+| `LIMIT` enforcement | every query bounded, one definition of the maximum, clamped 1 to 100 | `src/db_safety.py` | done |
+| Searchable endpoint | `GET /api/applicants` | `src/applicant_search.py` | done |
 | Least privilege | owner and runtime roles | `sql/` | pending |
 | Pylint 10.00/10 | fixes in code, no inline disables | `src/` | pending |
 | Dependency graph | pydeps and Graphviz | `dependency.svg` | pending |
@@ -534,11 +637,13 @@ module_5/
 │   ├── query_data.py           raw SQL analyses and the output formatters
 │   ├── orm_queries.py          the same analyses through the ORM
 │   ├── db_safety.py            query limits and input checks
-│   ├── applicant_search.py     GET /api/applicants search (stub; Phase 4)
+│   ├── applicant_search.py     GET /api/applicants search
 │   ├── templates/index.html    the analysis page
 │   └── static/style.css        page styles
 ├── tests/                      all test code; conftest.py holds the fixtures
 │   ├── snapshots/              Module 4 answers and compiled SQL, for parity tests
+│   ├── test_applicant_search.py    the endpoint's contract and validation
+│   ├── test_sqli_malicious.py  the malicious-input matrix, against a real database
 │   ├── test_db_safety.py       limit clamping and input validation
 │   ├── test_sql_guard.py       no string-built SQL, composed-only, every SELECT limited
 │   ├── test_config.py          configuration and secrets handling

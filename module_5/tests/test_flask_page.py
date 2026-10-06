@@ -11,7 +11,7 @@ from bs4 import BeautifulSoup
 from sqlalchemy.exc import SQLAlchemyError
 
 import app as app_module
-from app import create_app, make_scraper, run_in_background
+from app import Services, create_app, make_scraper, run_in_background
 
 pytestmark = pytest.mark.web
 
@@ -49,8 +49,9 @@ def test_get_analysis_returns_503_when_the_database_is_unreachable(fake_scraper,
     def _raising_query():
         raise SQLAlchemyError("connection refused")
 
-    broken = create_app(scraper=fake_scraper, loader=fake_loader, query=_raising_query,
-                        database_url=db_url, testing=True)
+    broken = create_app(
+        Services(scraper=fake_scraper, loader=fake_loader, query=_raising_query),
+        database_url=db_url, testing=True)
     response = broken.test_client().get("/analysis")
 
     assert response.status_code == 503
@@ -84,3 +85,57 @@ def test_make_scraper_binds_the_given_session_factory(monkeypatch):
     make_scraper(fake_factory)()
 
     assert calls == [fake_factory]
+
+
+# --- Module 5: the Services seam (CHG-09) -----------------------------------
+
+def test_services_default_to_real_implementations(db_url):
+    """Left unset, each field becomes the real implementation, not None and not a fake."""
+    from dataclasses import fields
+    from models import make_session_factory
+
+    resolved = app_module.with_defaults(Services(), make_session_factory(db_url), db_url, True)
+
+    assert all(getattr(resolved, field.name) is not None for field in fields(Services))
+    assert resolved.runner is app_module.run_inline
+    background = app_module.with_defaults(Services(), make_session_factory(db_url), db_url, False)
+    assert background.runner is app_module.run_in_background
+    # The default search is the real one: with nothing listening it raises the
+    # database error rather than returning rows.
+    unreachable = app_module.with_defaults(
+        Services(), make_session_factory(db_url), "postgresql+psycopg://localhost:1/none", True)
+    with pytest.raises(app_module.DatabaseUnavailable):
+        unreachable.search(object())
+
+
+def test_services_override_is_used(db_url):
+    """A field that is set is used as given; the others are still filled in."""
+    from models import make_session_factory
+
+    def custom_search(_filters):
+        return [{"p_id": 7}]
+
+    resolved = app_module.with_defaults(
+        Services(search=custom_search), make_session_factory(db_url), db_url, True)
+    assert resolved.search is custom_search
+    assert resolved.scraper is not None and resolved.query is not None
+
+    client = create_app(Services(search=custom_search), database_url=db_url,
+                        testing=True).test_client()
+    assert client.get("/api/applicants").get_json()["rows"] == [{"p_id": 7}]
+
+
+def test_services_is_frozen_and_every_field_is_optional():
+    from dataclasses import FrozenInstanceError
+    services = Services()
+    assert (services.scraper, services.loader, services.query,
+            services.runner, services.search) == (None, None, None, None, None)
+    with pytest.raises(FrozenInstanceError):
+        services.search = lambda filters: []
+
+
+def test_create_app_with_no_arguments_builds_an_app_with_every_route():
+    """The Module 3 call, create_app(), still works."""
+    app = create_app()
+    rules = {rule.rule for rule in app.url_map.iter_rules()}
+    assert {"/", "/analysis", "/pull-data", "/update-analysis", "/api/applicants"} <= rules
