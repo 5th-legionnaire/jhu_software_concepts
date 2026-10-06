@@ -428,7 +428,7 @@ is empty. App starts from `.env`. `git check-ignore -q .env` succeeds.
   checklist, overview, structure, Fresh Install (pip and uv), environment-variable table, security-tooling
   commands, with pending items marked. Architecture onward is still the Module 4 baseline until Phase 10.
 
-### Phase 3: SQL composition and LIMIT everywhere (CHG-05, CHG-06, CHG-07)
+### Phase 3: SQL composition and LIMIT everywhere (CHG-05, CHG-06, CHG-07) (COMPLETE)
 
 **Entry:** standard. Parity snapshots from Phase 0 are present.
 
@@ -847,3 +847,4 @@ Appended by `gate.sh` at each phase exit.
 | 0 | 2026-10-05 20:06 | 13acd9f | 107 | 100.00% | 8.30 | Scaffold, snapshots, gate tooling, CHG-18. Pylint baseline 8.30 measured (plan said 8.36); amendments A0.1 to A0.9. |
 | 1 | 2026-10-05 20:34 | 2bd7d2b | 114 | 100.00% | 8.30 | setup.py, universal 70-pin lock, editable install, fresh install with pip and uv; amendments A1.1 to A1.5. |
 | 2 | 2026-10-05 21:53 | a00ebfa | 189 | 100.00% | 8.31 | DB_* config with roles, sanitized connection errors, .env.example, TEST_DATABASE_URL pulled forward, README first pass; amendments A2.1 to A2.8. |
+| 3 | 2026-10-05 22:01 | 48b2a49 | 333 | 100.00% | 8.52 | Composed SQL, LIMIT everywhere, db_safety, parity with Module 4 over 30,000 rows; amendments A3.1 to A3.5. |
