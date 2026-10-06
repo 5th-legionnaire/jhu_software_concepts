@@ -721,6 +721,17 @@ committed. `test_compiled_sql_unchanged` passes. Behavior parity holds (the run_
 **Exit:** standard gate plus: the SVG shows every `src/` module and both new modules. The explanation
 draft is stored in `report/` for Phase 10.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A7.1** Final flags: `pydeps src/app.py --noshow -T svg -o dependency.svg --max-module-depth=1`. The default
+  drew every submodule of psycopg, SQLAlchemy and Flask (156 KB, unreadable); this keeps all ten project
+  modules and one node per package (29 KB).
+- **A7.2** pydeps arrows point from the imported module to its importer; the report says so.
+- **A7.3** `pull_data -> scrape -> clean -> load_data` was conceptual. In the imports, `pull_data` imports all
+  four plus `models`, and `clean` imports `scrape`; the explanation describes the graph.
+- **A7.4** Tests regenerate the graph and compare nodes and edges, and recompute the report's structural
+  claims (hub, shared leaf, no cycles) from the edges.
+- **A7.5** BeautifulSoup lies beyond the two-import depth and is not drawn.
+
 ### Phase 8: Snyk (required plus extra credit)
 
 **Entry:** standard, plus track A done: `snyk whoami` succeeds, Snyk Code is enabled, and

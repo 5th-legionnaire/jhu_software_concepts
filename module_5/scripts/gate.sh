@@ -356,6 +356,29 @@ connection.close()
         [ "$(grep -cE '^[a-z-]+=' .pylintrc)" -eq 2 ] || fail G9 ".pylintrc holds more than the two permitted entries"
         ok G9 ".pylintrc holds exactly the source root and the SQLAlchemy classification"
         ;;
+    7)
+        # The same validation the CI dependency-graph job runs (R30).
+        command -v dot >/dev/null || fail G9 "Graphviz's dot is not installed (brew install graphviz)"
+        test -s dependency.svg && grep -q "<svg" dependency.svg || fail G9 "dependency.svg is empty or not an SVG"
+        local missing=""
+        for module in app applicant_search clean db_safety load_data models orm_queries pull_data query_data scrape; do
+            name="$module"; [ "$module" = "app" ] && name="app_py"
+            grep -q "<title>$name</title>" dependency.svg || missing="$missing $module"
+        done
+        [ -z "$missing" ] || fail G9 "dependency.svg is missing:$missing"
+        ok G9 "dependency.svg is a valid SVG naming all ten src/ modules, both new ones included"
+
+        # Regenerate with the documented command: the committed graph must be current.
+        "$PY" -m pydeps src/app.py --noshow -T svg -o "$GATE_DIR/regenerated.svg" --max-module-depth=1 >/dev/null 2>&1 \
+            || fail G9 "pydeps failed to regenerate the graph"
+        [ "$(grep -o '<title>[^<]*</title>' dependency.svg | sort | md5)" = "$(grep -o '<title>[^<]*</title>' "$GATE_DIR/regenerated.svg" | sort | md5)" ] \
+            || fail G9 "dependency.svg is stale: regenerate it with the command in the README"
+        ok G9 "the committed graph matches a fresh pydeps run"
+
+        grep -q -- "--max-module-depth=1" README.md && grep -q -- "--max-module-depth=1" report/dependency_summary.md \
+            || fail G9 "the final pydeps flags are not recorded in the README and the summary"
+        ok G9 "the flags are recorded in the README and the summary"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

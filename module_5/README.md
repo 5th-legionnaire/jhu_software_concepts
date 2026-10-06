@@ -21,10 +21,10 @@ This README is a **first pass, written while Module 5 is being built.** The
 build follows [PLAN.md](PLAN.md) in gated phases. Each phase must pass
 `scripts/gate.sh` (tests, 100% coverage, Pylint, secrets scan, Change Register)
 before it is committed, and the [Gate Log](PLAN.md) records each result.
-**Complete as of this commit: Phases 0 to 6** (scaffold and gate tooling;
+**Complete as of this commit: Phases 0 to 7** (scaffold and gate tooling;
 packaging and the pinned lock; configuration and secrets; SQL composition and
-`LIMIT`; the search endpoint; the least-privilege database; Pylint 10.00/10).
-**Not started:** the dependency graph, Snyk, the CI workflow, and the PDF report. Sections below that describe those are marked *pending*.
+`LIMIT`; the search endpoint; the least-privilege database; Pylint 10.00/10; the
+dependency graph). **Not started:** Snyk, the CI workflow, and the PDF report. Sections below that describe those are marked *pending*.
 The sections from "Architecture" onward still describe the Module 4 baseline
 and are brought up to date in Phase 10.
 
@@ -835,6 +835,29 @@ This list mirrors them.
   1 local-count message (CHG-15); 2 `too-few-public-methods` (CHG-17); 1 useless
   return (A6.5). Phase 3 had already removed the f-string line-length hits.
 
+### Phase 7 amendments
+
+- **A7.1 The graph is collapsed to one node per package.** The plan's default,
+  `--max-bacon=2`, draws every submodule of psycopg, SQLAlchemy and Flask. That
+  was 156 KB and buried the project's own structure. `--max-module-depth=1`
+  keeps all ten project modules and draws each third-party package as one node:
+  29 KB, ten modules and thirteen packages. The command is recorded in the
+  README, the summary, and the test that regenerates the graph.
+- **A7.2 Arrows point from the imported module to its importer.** That is
+  pydeps's convention and the reverse of what many readers expect, so the report
+  says so beside the picture.
+- **A7.3 The plan's chain `pull_data -> scrape -> clean -> load_data` was
+  conceptual.** In the imports, `pull_data` imports all four of `scrape`, `clean`,
+  `load_data` and `models`, and `clean` imports `scrape`. The explanation
+  describes what the graph shows.
+- **A7.4 The graph is tested, not just committed.** The tests regenerate it and
+  compare nodes and edges, so an import added later fails the build until the graph is
+  refreshed. They also recompute the report's claims (the hub, the shared leaf,
+  no cycles) from the edges, so the prose cannot drift from the picture. They need
+  Graphviz installed, which the Fresh Install section already requires.
+- **A7.5 BeautifulSoup is beyond the edge.** The graph stops two imports from
+  `app.py`, and `clean` is two away, so its parser is the first package left off.
+
 ## Deliverables checklist
 
 From the assignment's "Final Deliverables" and its expected directory
@@ -863,7 +886,8 @@ the rest name the phase that produces them.
       and the [privileges.png](privileges.png) screenshot of `\dp applicants`.
 - [x] **10/10 Pylint evidence**, [pylint_report.txt](pylint_report.txt) (Phase 6).
       The command is documented under [Security tooling](#security-tooling).
-- [ ] **`dependency.svg`** (Phase 7).
+- [x] **`dependency.svg`** (Phase 7): built with pydeps and Graphviz, with the
+      7-sentence explanation in [report/dependency_summary.md](report/dependency_summary.md).
 - [ ] **`snyk-analysis.png`**, and for extra credit `snyk-code-analysis.png`
       (Phase 8).
 - [ ] **`.github/workflows/ci.yml`** and **`actions_success.png`** (Phase 9).
@@ -894,7 +918,7 @@ scan run in CI.
 | Searchable endpoint | `GET /api/applicants` | `src/applicant_search.py` | done |
 | Least privilege | owner and runtime roles, `SELECT` and `INSERT` only | `sql/` | done |
 | Pylint 10.00/10 | fixes in code, no inline disables, one classification in `.pylintrc` | `src/`, `pylint_report.txt` | done |
-| Dependency graph | pydeps and Graphviz | `dependency.svg` | pending |
+| Dependency graph | pydeps and Graphviz; every module and package, no import cycles | `dependency.svg`, `report/` | done |
 | Snyk | dependency and code scans | `snyk-analysis.png` | pending |
 | CI | lint, graph, Snyk, and tests as four jobs | `.github/workflows/ci.yml` | pending |
 
@@ -923,6 +947,7 @@ module_5/
 │   └── static/style.css        page styles
 ├── tests/                      all test code; conftest.py holds the fixtures
 │   ├── snapshots/              Module 4 answers and compiled SQL, for parity tests
+│   ├── test_dependency_graph.py  dependency.svg is current and its claims hold
 │   ├── test_least_privilege.py the two accounts, as the database sees them
 │   ├── test_applicant_search.py    the endpoint's contract and validation
 │   ├── test_sqli_malicious.py  the malicious-input matrix, against a real database
@@ -936,6 +961,8 @@ module_5/
 ├── sql/                        roles.sql, grants.sql, migrate_ownership.sql
 ├── scripts/                    gate.sh, change-register and secrets checks,
 │                               lock regeneration, fresh-install check
+├── dependency.svg              the import graph, from pydeps and Graphviz
+├── report/                     report source: the graph explanation (more in Phase 10)
 ├── docs/                       Sphinx project
 ├── data/                       bulk JSON input, never imported
 ├── llm_hosting/                instructor-provided LLM standardizer
@@ -953,7 +980,7 @@ resolve through the editable install of `setup.py` (see
 [CHG-01](#chg-01)); `src/` is deliberately not a package, because converting it
 would break parity with Module 3, where these files sat at the top level.
 
-Not yet present, and produced in later phases: `dependency.svg`, `snyk-analysis.png`,
+Not yet present, and produced in later phases: `snyk-analysis.png`,
 `actions_success.png`, `module_5_report.pdf`, and
 `../.github/workflows/ci.yml`.
 
@@ -1243,7 +1270,7 @@ active.
 | Tool | Command | Reads as | Status |
 | --- | --- | --- | --- |
 | Pylint | `pylint --rcfile=.pylintrc --fail-under=10 src` | must print `rated at 10.00/10` with no message lines | **10.00/10**, committed as `pylint_report.txt` (Phase 6) |
-| pydeps | `pydeps src/app.py --noshow -T svg -o dependency.svg` | needs Graphviz's `dot` on the path | pending (Phase 7) |
+| pydeps | `pydeps src/app.py --noshow -T svg -o dependency.svg --max-module-depth=1` | needs Graphviz's `dot` on the path; arrows point from an imported module to its importer | done: [dependency.svg](dependency.svg), explained in [report/dependency_summary.md](report/dependency_summary.md) |
 | Snyk, dependencies | `snyk test --file=requirements.txt --package-manager=pip --command=python` | lists known vulnerabilities in the pinned packages | pending (Phase 8) |
 | Snyk Code | `snyk code test` | static analysis of `src/` (extra credit) | pending (Phase 8) |
 
