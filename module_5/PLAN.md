@@ -269,7 +269,7 @@ module_5/
 
 ## 7. Phases
 
-### Phase 0: Scaffold, baseline, and gate tooling
+### Phase 0: Scaffold, baseline, and gate tooling (COMPLETE)
 
 **Entry:** E2 on the repo root. `module_4` suite green with Module 4's own instructions. Python 3.14.6 available.
 
@@ -784,3 +784,4 @@ Appended by `gate.sh` at each phase exit.
 | Phase | Completed (ET) | Commit | Tests | Coverage | Pylint | Notes |
 |---|---|---|---|---|---|---|
 | baseline | 2026-10-05 | 1ecf2c9 | 102 | 100% | 8.36 | module_4 HEAD |
+| 0 | 2026-10-05 20:06 | 13acd9f | 107 | 100.00% | 8.30 | Scaffold, snapshots, gate tooling, CHG-18. Pylint baseline 8.30 measured (plan said 8.36); amendments A0.1 to A0.9. |
