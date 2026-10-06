@@ -3,8 +3,8 @@
 **Name:** Joshua Latz | **JHED ID:** jlatz1 | **Module 5:** Software Assurance and Secure SQL (SQLi Defense)
 **Repository:** `git@github.com:5th-legionnaire/jhu_software_concepts.git`, this work under `module_5/`
 **Python:** 3.14.6 | **PostgreSQL:** 18.6 local, 16 in CI | **Baseline:** `module_4` at commit `1ecf2c9`
-**Documentation:** <https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/> (serves Module 4 until
-the end of Module 5, when it is repointed here; Module 4 stays reachable at the `module-4-final` tag)
+**Documentation:** <https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/> (`latest` builds this module;
+Module 4's docs are the `module-4-final` version)
 
 This module hardens the Grad Café analytics service from Modules 3 and 4: it loads scraped applicant data into
 PostgreSQL, analyzes it with raw SQL and the SQLAlchemy ORM, and serves an analysis page and a JSON search endpoint.
@@ -39,11 +39,11 @@ Each row is one thing the assignment asks for, where it is, and one command that
 Pylint 10.00/10, Snyk 0 findings across all 70 pinned packages (22 found and fixed), 51 malicious-input cases, and
 phases 0 to 8 recorded in the Gate Log with their commit, test count and score.
 
-**Status.** Phases 0 to 9 are complete and gated. CI run
+**Status.** Phases 0 to 11 are complete and gated. CI run
 [37408248003](https://github.com/5th-legionnaire/jhu_software_concepts/actions/runs/37408248003) on commit `669064d` is
 green in all five jobs (`lint`, `dependency-graph`, `snyk`, `test (pip)`, `test (uv)`), shown in
-[actions_success.png](actions_success.png). The report is [module_5_report.pdf](module_5_report.pdf). What remains is
-after submission: repointing Read the Docs to this module (Phase 11, with Module 4 kept at the `module-4-final` tag).
+[actions_success.png](actions_success.png). The report is [module_5_report.pdf](module_5_report.pdf). Read the Docs now
+builds this module (Phase 11), and Module 4's docs are kept as the `module-4-final` version.
 Limitations of the data and the application are under [Known issues](#known-issues).
 
 ## Get it running
@@ -1020,6 +1020,26 @@ asserts each requirement by name (`test_four_jobs`, `test_pylint_fail_under_10`,
 threshold is lowered or the Snyk step is made non-failing. It cannot replace a
 green run, which is the real evidence: see `actions_success.png`.
 
+<a id="chg-20"></a>
+
+### CHG-20: Read the Docs serves Module 5, and Module 4 stays reachable
+
+**Problem.** Read the Docs built `module_4/docs`. Repointing it replaces what `latest`
+serves, and Module 4's grade was still pending, so its docs had to stay online.
+
+**Decision.** The commit Module 5 was built from, `1ecf2c9`, is tagged `module-4-final`.
+Read the Docs reads `.readthedocs.yaml` from each version's own commit, and at that tag
+the file still points at `module_4`, so the `module-4-final` version keeps building Module
+4's docs. The current `.readthedocs.yaml` builds `module_5/docs` with `fail_on_warning`,
+which is safe because the build is clean under `sphinx-build -W` and the Phase 10 gate
+keeps it that way.
+
+**Trade-off.** The tag must be activated as a version in the Read the Docs dashboard,
+which takes an account login and so cannot be done from the repository.
+
+**Verified by.** Evidence: the tag on GitHub, the strict local build in the Phase 10 and
+11 gates, and both versions loading on Read the Docs.
+
 <a id="chg-21"></a>
 
 ### CHG-21: the role table holds variable names as a pair, not a `"password"` key
@@ -1348,6 +1368,15 @@ This list mirrors them.
   protected accesses (CHG-14); 2 broad catches (CHG-10); 4 argument-count and
   1 local-count message (CHG-15); 2 `too-few-public-methods` (CHG-17); 1 useless
   return (A6.5). Phase 3 had already removed the f-string line-length hits.
+
+### Phase 11 amendments
+
+- **A11.1 The zip was rebuilt after each post-submission change.** Phases 10 and 11 changed
+  files inside `module_5/`, so the zip was rebuilt from the pushed commit each time, to keep
+  the Canvas copy identical to GitHub.
+- **A11.2 One step happens outside the repository.** The `module-4-final` tag is pushed;
+  activating it as a Read the Docs version is done in the dashboard, so CHG-20 records its
+  evidence rather than a test.
 
 ### Phase 10 amendments
 

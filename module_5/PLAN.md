@@ -897,6 +897,12 @@ fresh shell and worked.
 **Exit:** the submission checklist is fully ticked, CI is green on the submitted commit, and both RTD
 versions load.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A11.1** The submitted zip was rebuilt after Phase 10 so Canvas matches GitHub, and again after Phase 11, since
+  CHANGES.md and the README live inside `module_5/`.
+- **A11.2** The `module-4-final` tag was pushed in this phase; activating it as a Read the Docs version is a dashboard
+  step for Josh, so CHG-20 records its evidence rather than a test.
+
 ---
 
 ## 8. Definition of done

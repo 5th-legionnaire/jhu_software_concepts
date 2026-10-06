@@ -1,5 +1,8 @@
 version: 2
 
+# Builds module_5's docs. Module 4's docs stay reachable as the version built
+# from the module-4-final tag, whose own copy of this file points at module_4.
+
 build:
   os: ubuntu-24.04
   tools:
@@ -8,9 +11,10 @@ build:
     python: "3.14"
 
 sphinx:
-  configuration: module_4/docs/conf.py
-  fail_on_warning: false
+  configuration: module_5/docs/conf.py
+  # The build is clean under sphinx-build -W, and the Phase 10 gate keeps it so.
+  fail_on_warning: true
 
 python:
   install:
-    - requirements: module_4/requirements.txt
+    - requirements: module_5/requirements.txt

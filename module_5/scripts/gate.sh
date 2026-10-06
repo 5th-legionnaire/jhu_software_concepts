@@ -461,6 +461,23 @@ sys.exit(1 if missing else 0)
 PYCHECK
         ok G9 "every file the README links to exists"
         ;;
+    11)
+        grep -q "configuration: module_5/docs/conf.py" ../.readthedocs.yaml \
+            && grep -q "requirements: module_5/requirements.txt" ../.readthedocs.yaml \
+            || fail G9 ".readthedocs.yaml does not build module_5"
+        ok G9 ".readthedocs.yaml builds module_5/docs from module_5/requirements.txt"
+        [ "$(git -C "$REPO" rev-parse 'module-4-final^{commit}' 2>/dev/null | cut -c1-7)" = "1ecf2c9" ] \
+            || fail G9 "tag module-4-final does not point at 1ecf2c9"
+        git -C "$REPO" ls-remote --tags origin module-4-final | grep -q module-4-final \
+            || fail G9 "tag module-4-final is not on GitHub"
+        git -C "$REPO" show module-4-final:.readthedocs.yaml | grep -q "module_4/docs/conf.py" \
+            || fail G9 "at module-4-final, .readthedocs.yaml does not build module_4"
+        ok G9 "module-4-final is on GitHub at 1ecf2c9, and builds module_4's docs there"
+        rm -rf docs/_build
+        "$PY" -m sphinx -W -q -b html docs docs/_build/html >"$GATE_DIR/phase-11-sphinx.log" 2>&1 \
+            || fail G9 "the Sphinx build that Read the Docs will run has warnings; see .gate/phase-11-sphinx.log"
+        ok G9 "the docs Read the Docs will build are clean under -W"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;
