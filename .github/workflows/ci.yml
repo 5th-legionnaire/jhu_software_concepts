@@ -10,12 +10,10 @@
 
 name: module-5-ci
 
+# Every push and every pull request, on any branch, as the assignment requires.
 on:
   push:
-    branches: [main]
-    paths: ["module_5/**", ".github/workflows/ci.yml"]
   pull_request:
-    paths: ["module_5/**", ".github/workflows/ci.yml"]
   workflow_dispatch:
 
 defaults:

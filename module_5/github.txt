@@ -1,2 +1,0 @@
-# SSH link to jlatz1's personal, privage github repo for the course
-git@github.com:5th-legionnaire/jhu_software_concepts.git

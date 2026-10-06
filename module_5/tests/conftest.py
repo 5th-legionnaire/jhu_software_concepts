@@ -26,8 +26,23 @@ import configparser
 import datetime
 import os
 
+import pathlib
+
 import pytest
+from dotenv import dotenv_values
 from psycopg import sql
+
+# The suite never reads the developer's .env into the environment. load_data
+# calls load_dotenv() at import, which would hand every test the developer's
+# DB_* settings, so a test that forgot to configure its own database would pass
+# locally and fail on a clean machine. CI found three such tests. With the loader
+# switched off, a local run sees exactly what CI sees. Only the two test-database
+# URLs are taken from .env, explicitly and by name, so db tests still run locally.
+os.environ["PYTHON_DOTENV_DISABLED"] = "1"
+_DOTENV = dotenv_values(pathlib.Path(__file__).resolve().parent.parent / ".env")
+for _name in ("TEST_DATABASE_URL", "TEST_ADMIN_DATABASE_URL"):
+    if _name not in os.environ and _DOTENV.get(_name):
+        os.environ[_name] = _DOTENV[_name]
 
 # The flat src/ modules resolve through the editable install
 # (pip install -e ., see setup.py), the same way they do in the app and in CI,

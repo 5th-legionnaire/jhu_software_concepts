@@ -134,8 +134,14 @@ def test_services_is_frozen_and_every_field_is_optional():
         services.search = lambda filters: []
 
 
-def test_create_app_with_no_arguments_builds_an_app_with_every_route():
-    """The Module 3 call, create_app(), still works."""
+def test_create_app_with_no_arguments_builds_an_app_with_every_route(monkeypatch, db_url):
+    """The Module 3 call, create_app(), still works when the environment names a database.
+
+    The settings come from the environment, as they do when the app is run for real. An
+    app with nothing configured cannot build its engine, and says which variable is
+    missing (test_config.py).
+    """
+    monkeypatch.setenv("DATABASE_URL", db_url)
     app = create_app()
     rules = {rule.rule for rule in app.url_map.iter_rules()}
     assert {"/", "/analysis", "/pull-data", "/update-analysis", "/api/applicants"} <= rules

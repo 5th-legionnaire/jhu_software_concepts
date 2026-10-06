@@ -39,11 +39,12 @@ def test_four_jobs(workflow):
     assert set(workflow["jobs"]) == {"lint", "dependency-graph", "snyk", "test"}
 
 
-def test_triggers_cover_push_pull_request_and_manual_runs(workflow):
+def test_the_workflow_runs_on_every_push_and_pull_request(workflow):
+    """The assignment says "runs on every push/PR": no branch or path filter may narrow it."""
     triggers = workflow[True]            # PyYAML reads the bare key "on" as True
     assert set(triggers) == {"push", "pull_request", "workflow_dispatch"}
     for name in ("push", "pull_request"):
-        assert "module_5/**" in triggers[name]["paths"]
+        assert not triggers[name], f"{name} is filtered: {triggers[name]}"
 
 
 def test_every_job_runs_in_module_5_on_the_pinned_python(workflow):

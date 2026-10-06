@@ -110,7 +110,10 @@ def test_main_prints_run_all_output(capsys, monkeypatch, clean_db, db_url):
     assert "Q1" in capsys.readouterr().out
 
 
-def test_main_exits_when_database_is_unreachable(monkeypatch):
+def test_main_exits_when_database_is_unreachable(monkeypatch, db_url):
+    # DATABASE_URL satisfies the configuration, so the test reaches the connection
+    # it is about instead of failing on a missing setting.
+    monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setattr(qd, "create_connection", lambda config: None)
     with pytest.raises(SystemExit):
         qd.main()

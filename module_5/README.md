@@ -1,35 +1,498 @@
 # EN 605.256 Modern Software Concepts in Python: Module 5
 
-**Name:** Joshua Latz
-**JHED ID:** jlatz1
-**Module:** Module 5, Assignment: Software Assurance and Secure SQL (SQLi Defense)
-**Repository:** `git@github.com:5th-legionnaire/jhu_software_concepts.git`. This assignment lives under `module_5/`.
-**Documentation:** <https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/>
-(still serving Module 4 until Read the Docs is repointed at the end of Module 5, with Module 4 kept
-reachable at the `module-4-final` tag)
-**Python:** 3.14.6 (CPython, macOS)
-**PostgreSQL:** 18.6 (Homebrew)
+**Name:** Joshua Latz | **JHED ID:** jlatz1 | **Module 5:** Software Assurance and Secure SQL (SQLi Defense)
+**Repository:** `git@github.com:5th-legionnaire/jhu_software_concepts.git`, this work under `module_5/`
+**Python:** 3.14.6 | **PostgreSQL:** 18.6 local, 16 in CI | **Baseline:** `module_4` at commit `1ecf2c9`
+**Documentation:** <https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/> (serves Module 4 until
+the end of Module 5, when it is repointed here; Module 4 stays reachable at the `module-4-final` tag)
 
-> **Note on section references.** Headings in this README are not numbered. The
-> Module 3 README numbered them, and source comments referred to numbers such as
-> "section 5.2"; renumbering during this module broke those references silently.
-> Source comments now name headings by title instead.
+This module hardens the Grad Café analytics service from Modules 3 and 4: it loads scraped applicant data into
+PostgreSQL, analyzes it with raw SQL and the SQLAlchemy ORM, and serves an analysis page and a JSON search endpoint.
+Module 5 adds packaging and a pinned environment, credentials from the environment only, composed and
+parameterized SQL, bounded reads, a least-privilege database account, 10.00/10 Pylint, a dependency graph,
+Snyk scans, and a four-job CI pipeline. Every design change from Module 4 is in the
+[Change Register](CHANGES.md) with its reason and the tests that verify it.
 
-## Status
+## Start here: verify the submission
 
-This README is a **first pass, written while Module 5 is being built.** The
-build follows [PLAN.md](PLAN.md) in gated phases. Each phase must pass
-`scripts/gate.sh` (tests, 100% coverage, Pylint, secrets scan, Change Register)
-before it is committed, and the [Gate Log](PLAN.md) records each result.
-**Complete as of this commit: Phases 0 to 8, with Phase 9's workflow committed and awaiting its first green run** (scaffold and gate tooling;
-packaging and the pinned lock; configuration and secrets; SQL composition and
-`LIMIT`; the search endpoint; the least-privilege database; Pylint 10.00/10; the
-dependency graph; Snyk). **Not started:** the CI workflow and the PDF report. Sections below that describe those are marked *pending*.
-The sections from "Architecture" onward still describe the Module 4 baseline
-and are brought up to date in Phase 10.
+Each row is one thing the assignment asks for, where it is, and one command that checks it from `module_5/` once
+[the environment is up](#get-it-running).
 
-Two sections are maintained from the first phase on: every design change from
-Module 4, and every change to the plan itself.
+| Requirement | Evidence | Check it |
+| --- | --- | --- |
+| Pylint 10.00/10 on `src/`, no inline disables | [pylint_report.txt](pylint_report.txt), [.pylintrc](.pylintrc) | `pylint --rcfile=.pylintrc --fail-under=10 src` |
+| Tests, 100% coverage, every test marked | [coverage_summary.txt](coverage_summary.txt) | `pytest` (605 tests) |
+| No SQL built from strings; composed and parameterized; construction apart from execution | [tests/test_sql_guard.py](tests/test_sql_guard.py), [CHG-05](#chg-05) | `pytest tests/test_sql_guard.py` |
+| Malicious input handled (51 cases, never a 500) | [tests/test_sqli_malicious.py](tests/test_sqli_malicious.py), [CHG-08](#chg-08) | `pytest tests/test_sqli_malicious.py` |
+| `LIMIT` on every query, maximum enforced | [src/db_safety.py](src/db_safety.py), [CHG-07](#chg-07) | `pytest tests/test_db_safety.py` |
+| Credentials from the environment, `.env.example`, `.env` ignored | [.env.example](.env.example), [leak check](#credentials-were-checked-for-leaks) | `python scripts/check_credential_leaks.py` |
+| Least-privilege database account | [sql/](sql/), [privileges.txt](privileges.txt), [privileges.png](privileges.png), [CHG-12](#chg-12) | `pytest tests/test_least_privilege.py` |
+| Dependency graph and its explanation | [dependency.svg](dependency.svg), [report/dependency_summary.md](report/dependency_summary.md) | `pydeps src/app.py --noshow -T svg -o dependency.svg --max-module-depth=1` |
+| `setup.py`, pinned `requirements.txt`, pip and uv installs | [setup.py](setup.py), [requirements.txt](requirements.txt) | `scripts/fresh_install_check.sh` |
+| Snyk, findings fixed (extra credit: Snyk Code) | [snyk_report.json](snyk_report.json), [snyk-analysis.png](snyk-analysis.png), [snyk-code-analysis.png](snyk-code-analysis.png), [triage](report/snyk_triage.md) | `scripts/snyk_scan.sh` |
+| GitHub Actions CI, four jobs | [.github/workflows/ci.yml](../.github/workflows/ci.yml), [actions_success.png](actions_success.png) | the [Actions page](https://github.com/5th-legionnaire/jhu_software_concepts/actions/workflows/ci.yml) |
+| PDF report | [module_5_report.pdf](module_5_report.pdf), built by [report/build_report.py](report/build_report.py) | `python report/build_report.py` |
+| Every change from Module 4, explained and tested | [CHANGES.md](CHANGES.md), [Changes from Module 4](#changes-from-module-4) | `python scripts/check_change_register.py 9` |
+| Process: gated phases, Gate Log | [PLAN.md](PLAN.md), [Development process](#development-process) | `scripts/gate.sh 9` |
+
+**Results at a glance** (each produced by running the command, not typed): 605 tests passed, 100.00% coverage,
+Pylint 10.00/10, Snyk 0 findings across all 70 pinned packages (22 found and fixed), 51 malicious-input cases, and
+phases 0 to 8 recorded in the Gate Log with their commit, test count and score.
+
+**Status.** Phases 0 to 8 are gated and in the Gate Log. Phase 9 (CI) is implemented and passed its offline gate;
+its live stage needs a green run of the pushed commit. Outstanding, and listed so nothing is assumed: the green CI
+screenshot `actions_success.png` (the file in this folder is still Module 4's until replaced), the Phase 9 Gate Log
+row, the PDF report, the Read the Docs repoint (Phase 11, after submission), and the items under
+[Known issues](#known-issues).
+
+## Get it running
+
+Python 3.14 is required (3.14.6 is what this was built and tested on). Everything below runs from `module_5/`.
+
+### 1. Environment: Fresh Install (pip or uv)
+
+One environment covers the application, the ETL code, the test suite with
+coverage, linting, the dependency graph, and the Sphinx build. Dependencies are
+declared once, in `setup.py`; `requirements.txt` is the pinned lock generated
+from it. Python 3.14 is required (3.14.6 is what the project is developed and
+tested on). From a fresh clone, either way works:
+
+**pip**
+
+```bash
+cd module_5
+python3.14 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+pip install -e . --no-deps
+```
+
+**uv**
+
+```bash
+cd module_5
+uv venv -p 3.14 .venv
+source .venv/bin/activate
+uv pip sync requirements.txt
+uv pip install -e . --no-deps
+```
+
+The second line of each recipe is the editable install of the project itself.
+It is what lets the flat `src/` modules import each other from anywhere, and it
+is the only supported way to install the project: a plain `pip install .` would
+not carry `src/templates/` and `src/static/`, because flat modules have no
+package to hold package data. See [CHG-01](#chg-01) and [CHG-02](#chg-02).
+
+`scripts/fresh_install_check.sh` proves both recipes. It copies the committed
+tree into a temporary directory with no `.venv` and no `.env`, runs each recipe
+there, imports every module from outside `src/`, runs `pylint --version` and
+`pydeps --version`, and runs the offline tests. To add or change a dependency,
+edit `setup.py` and run `scripts/regen_lock.sh`; do not edit the lock by hand.
+
+The project targets Python 3.14. Module 4's CI workflow pins 3.14.6 exactly
+(Module 5's workflow follows in Phase 9), and Read the Docs offers major.minor
+only, so it pins 3.14.
+
+### 2. Configuration: connection settings
+
+Copy `.env.example` to `.env` and fill it in. `.env` is gitignored, and
+`python-dotenv` loads it from `module_5/` if it exists; variables already set
+in the shell take precedence. Both the psycopg code and the ORM read:
+
+```bash
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=gradcafedb
+DB_USER=gradcafe_app          # runtime account: the web app and Pull Data
+DB_PASSWORD=change-me
+# DB_OWNER_USER / DB_OWNER_PASSWORD: schema setup and bulk load only
+```
+
+`DATABASE_URL` is an optional single-URL override, used by CI and tests. It
+takes precedence over `DB_*`. The test suite reads `TEST_DATABASE_URL`, a
+disposable database it truncates. The `PG*` variables Module 3 used are no
+longer read; see [CHG-03](#chg-03).
+
+Details worth knowing:
+
+- A URL spelled `postgresql://` has the `+psycopg` driver supplied
+  automatically. A bare `postgresql://` would otherwise send SQLAlchemy looking
+  for psycopg2, which this project does not install.
+- User names and passwords are percent-decoded, so a password containing `@` or
+  `/` is safe to carry in the URL.
+- Tests override the setting through `create_app(database_url=...)` rather than
+  through the environment, so a test run cannot reach the development database
+  by accident.
+
+No credentials, hosts, or machine-specific paths are hard-coded anywhere, and
+`.env` is never committed.
+
+### Environment variables
+
+Every variable the code reads, all set in `.env` (see `.env.example`) or the
+shell. A missing required variable raises an error that names the variable and
+never shows a value.
+
+| Variable | Used by | Required | Meaning |
+| --- | --- | --- | --- |
+| `DB_HOST` | every role | yes, unless `DATABASE_URL` is set | PostgreSQL host |
+| `DB_PORT` | every role | yes, unless `DATABASE_URL` is set | PostgreSQL port |
+| `DB_NAME` | every role | yes, unless `DATABASE_URL` is set | database name |
+| `DB_USER`, `DB_PASSWORD` | the `app` role: web app, Pull Data, ORM | yes, unless `DATABASE_URL` is set | runtime account |
+| `DB_OWNER_USER`, `DB_OWNER_PASSWORD` | the `owner` role: schema setup and bulk load | only for the owner role | owner account; keep out of the running app's environment |
+| `DATABASE_URL` | every role | no | single-URL override; beats `DB_*`, loses to an explicit argument |
+| `TEST_DATABASE_URL` | the test suite | for `db` and `integration` tests | disposable database the tests truncate |
+| `PORT` | `src/app.py` | no | port for the development server (default 8080) |
+
+All are read in `src/load_data.py` (`get_db_config`), `src/models.py`
+(`build_url`), and `tests/conftest.py`. The owner role is wired up with the
+least-privilege database in Phase 5; until then the runtime variables name the
+account you already use.
+
+### 3. PostgreSQL
+
+Install PostgreSQL, then create two empty databases: the one the application uses, and a disposable one the tests
+truncate and must never be pointed at real data.
+
+```bash
+createdb gradcafedb
+createdb gradcafe_test
+```
+
+The next section creates the two least-privilege accounts and loads the schema.
+
+
+### Database setup
+
+Run once, as a PostgreSQL superuser, from `module_5/`. `OWNER_PW` and `APP_PW`
+are passwords you choose; they go into `.env` and nowhere else. The scripts
+never receive a password. Each one is first turned into a SCRAM-SHA-256
+verifier, which PostgreSQL stores as it is, and handed over in the
+environment. A password on a `psql` command line shows in the process list, and
+one inside a statement is written to the server log if the statement fails, so
+neither is used. See [Credentials were checked for leaks](#credentials-were-checked-for-leaks).
+
+```bash
+# 1. The two roles, and a database only they can connect to
+export OWNER_VERIFIER=$(printf %s "$OWNER_PW" | python3 scripts/scram_verifier.py)
+export APP_VERIFIER=$(printf %s "$APP_PW" | python3 scripts/scram_verifier.py)
+psql -d postgres -v db=gradcafedb -f sql/roles.sql
+
+# 2a. A new database: the owner creates the table and loads the data
+DB_OWNER_USER=gradcafe_owner DB_OWNER_PASSWORD="$OWNER_PW" python3 src/load_data.py
+psql -d gradcafedb -f sql/grants.sql
+
+# 2b. An existing database: move the table under the owner instead
+psql -d gradcafedb -f sql/migrate_ownership.sql
+```
+
+Then set `DB_USER=gradcafe_app` and `DB_PASSWORD` in `.env`. Leave the owner's
+credentials out of it, and give them to the loader only for the moment you run
+it, as above. For the test database, repeat step 1 with `-v db=gradcafe_test`,
+create the table as the owner, apply `sql/grants.sql`, and set
+`TEST_DATABASE_URL` and `TEST_ADMIN_DATABASE_URL`. See [CHG-12](#chg-12) for
+what each account may do and why.
+
+### Credentials were checked for leaks
+
+**Why this section exists.** Phase 5 creates real accounts with real
+passwords, and a security control that is only asserted is an unverified claim.
+Module 5 is about assurance, which means evidence that a property holds and not
+confidence that it should. At the go-ahead for the live setup, the instruction
+was to make sure no credential was being logged, to test that it was not, and to
+document that the check was done. That instruction is the reason for everything
+below. It also found two leaks the original plan would have produced, which is
+the argument for checking: they were invisible until someone looked at the
+server's own settings.
+
+A password can leak by more routes than a committed file, so the setup was
+designed around four of them and then checked directly, with the real values,
+rather than assumed safe.
+
+| Route | What would have happened | What is done instead |
+| --- | --- | --- |
+| The process list | `psql -v owner_pw=...` puts the password on a command line any local user can read | Passwords are never arguments. `roles.sql` reads them from the environment, and `scram_verifier.py` reads one from standard input |
+| The server log | PostgreSQL writes the text of a statement that **fails** to its log (`log_min_error_statement` is `error` here), and this install's log file is readable by every local user, so a failed `ALTER ROLE ... PASSWORD 'secret'` would have published the password | The statement carries a SCRAM-SHA-256 verifier, a salted hash that PostgreSQL stores unchanged. The cleartext never reaches the server |
+| Shell and psql history | A password typed into a command is recorded in `~/.zsh_history` or `~/.psql_history` | The passwords were generated in memory, never typed, and never put on a command line |
+| Documentation | A README that says `-v owner_pw=...` teaches the leak | A test fails if the setup instructions mention a cleartext password argument |
+
+**Checked, not assumed.** After provisioning, the real passwords were searched
+for in the PostgreSQL log, `~/.zsh_history`, `~/.bash_history`, `~/.psql_history`,
+every file in the repository, the scratch directory, and everything `psql` and
+Python printed during setup: **no match anywhere**. A cleartext login also works
+against the stored verifier, which shows the verifier approach is sound and not
+a role nobody can log in as.
+
+**Why the check is permanent and not a one-time look.** A one-time search proves
+the state of the world at that moment and says nothing about the next commit.
+The ways it can regress are ordinary: someone pastes a working command into the
+README, a new log line prints a connection string, a CI step echoes the
+environment, a debugging session commits a `.env` fragment. None of these needs
+anyone to be careless about security, only to be busy. So the check runs on every
+gate, where a leak stops the commit, and it searches git history as well as the
+tree, because deleting a leaked file does not remove it from the repository. This
+is the same idea as the rest of the module: Pylint at 10.00, the SQL guard, and
+the least-privilege tests all move a failure to the earliest and cheapest point,
+before it ships.
+
+**Checked on every gate from Phase 5 on.** `scripts/check_credential_leaks.py`
+reads the passwords out of `.env` and searches the working tree, every commit in
+git history (so a leak that was later deleted still fails), the server log, and
+the shell history files. It prints counts and labels only, and never a password:
+git receives its search patterns from a private temporary file, not an argument.
+Its own tests plant a password in a file, a log, and a deleted commit and require
+that each is found, and require that the output never contains it. Each of those
+tests was also confirmed to fail against a deliberately broken copy of the check.
+`scripts/check_secrets.py` additionally scans `sql/` for a password literal.
+
+**What this does not cover.** The cleartext passwords exist in `.env`, which is
+gitignored and mode 600, because the application and the test fixtures need
+them. The owner's password is in `TEST_ADMIN_DATABASE_URL` for the same reason.
+The verifiers sit in PostgreSQL's `pg_authid`, readable only by superusers. A
+screen share, a backup of the data directory, or a process that can read another
+process's environment is outside what a repository can protect.
+
+### 4. Run it
+
+```bash
+python3 src/app.py        # then open http://127.0.0.1:8080/analysis   (set PORT to change 8080)
+curl "http://127.0.0.1:8080/api/applicants?limit=5&sort=gpa&order=desc"
+```
+
+Command-line programs: `python3 src/query_data.py` (raw SQL results), `python3 src/orm_queries.py` (ORM results),
+`python3 src/pull_data.py` (one pull without the page). Loading the bulk data is the owner's job and is in the next
+section. Then verify with the [table above](#start-here-verify-the-submission); the quickest full check is `pytest`.
+
+### 5. Optional pieces
+
+#### LLM standardizer setup
+
+The standardizer keeps its own environment, as in Module 2, because it depends
+on `llama-cpp-python`, which compiles native code. Pull Data runs it in that
+environment.
+
+```bash
+cd module_5/llm_hosting
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+If this environment is missing, Pull Data stops with a message saying so and
+adds nothing to the database. **No test requires it**: the test suite injects a
+fake scraper and never invokes the standardizer.
+
+#### Browser setup for Pull Data
+
+Grad Café sits behind Cloudflare. As in Module 2, the verification must be
+cleared once, by hand, in the persistent Chrome profile the scraper uses
+(`~/.gradcafe-chrome-profile`).
+
+**No test launches a browser.** `pull_data.py` takes its driver as an injected
+argument, so the suite supplies a stand-in instead.
+
+## Security tooling
+
+The commands are fixed here so that a reader can reproduce each result. All run
+from `module_5/` with the environment from [Fresh Install](#1-environment-fresh-install-pip-or-uv)
+active.
+
+| Tool | Command | Reads as | Status |
+| --- | --- | --- | --- |
+| Pylint | `pylint --rcfile=.pylintrc --fail-under=10 src` | must print `rated at 10.00/10` with no message lines | **10.00/10**, committed as `pylint_report.txt` (Phase 6) |
+| pydeps | `pydeps src/app.py --noshow -T svg -o dependency.svg --max-module-depth=1` | needs Graphviz's `dot` on the path; arrows point from an imported module to its importer | done: [dependency.svg](dependency.svg), explained in [report/dependency_summary.md](report/dependency_summary.md) |
+| Snyk, dependencies | `scripts/snyk_scan.sh` (it runs `snyk test --file=requirements.txt --package-manager=pip --command=python` on the pinned lock; see below) | lists known vulnerabilities in the pinned packages; `✔ no vulnerable paths found` is clean | done: 22 findings fixed, 0 remain |
+| Snyk Code | `snyk code test src` | static analysis of `src/` (extra credit) | done: 1 LOW accepted, see the triage |
+
+Pylint is run on `src/` only, as the assignment requires, and the project
+carries no inline `# pylint: disable`; findings are fixed in the code. The one
+configuration file, `.pylintrc`, says where the source lives and relaxes no
+rule.
+
+Two scripts guard the repository itself: `scripts/check_secrets.py` fails if a
+credential-shaped literal appears in `src/` or `tests/`, and
+`scripts/gate.sh` runs the checks above together with the tests before a phase
+may be committed.
+
+### Upgrading dependencies when a vulnerability is known
+
+A pinned lock is a snapshot of what was true on the day it was generated. Pinning
+is what makes an environment reproducible, and it also freezes whatever flaws that
+version has, because advisories are published *after* a release. A lock that was
+clean when it was written is not clean forever, which is why the scan is run
+against the lock, repeatedly, and not once.
+
+**What the scan found here.** 22 entries, which are 4 distinct issues in 2 of the 70
+pinned packages. Snyk lists one entry per dependency path, so `urllib3`'s three
+issues appear 21 times.
+
+| Package | Issue | Severity | Why it matters here |
+| --- | --- | --- | --- |
+| `urllib3` 2.7.0 | Improper Certificate Validation | High | A client could accept a certificate it should reject, which is what lets a machine in the middle impersonate a server |
+| `urllib3` 2.7.0 | Allocation of Resources Without Limits or Throttling | High | A hostile response can exhaust memory or CPU, a denial of service |
+| `urllib3` 2.7.0 | Infinite loop | Medium | A request can hang a process |
+| `python-dotenv` 1.0.1 | Symlink Attack | Medium | Rewriting a `.env` file can be redirected through a symlink to another file |
+
+**What was done, and why it was the right call.** `urllib3` went to 2.8.0 and
+`python-dotenv` to 1.2.4, and exactly two lines of the lock changed. Both versions
+were already permitted by the compatible-release ranges in `setup.py`, so a
+plain reinstall would not have taken them: a lock does not move on its own. The
+floors were raised (`urllib3~=2.8`, `python-dotenv~=1.2`) so that regenerating the
+lock can never go backward, and a test, `test_remediated_versions_stay_remediated`,
+fails if it does. The full suite was then re-run on the new versions, because a
+dependency bump is a code change that the tests, not the version number, vouch for.
+It passed, and Snyk now reports no findings in any of the 70 packages.
+
+**Why upgrade instead of arguing the flaw is unreachable.** The honest reachability
+analysis for each of these is short and not reassuring. `urllib3` is the HTTP client
+under Selenium, so it carries the project's browser traffic. `python-dotenv` is
+only read here, so its flaw is out of reach, but that conclusion depends on nobody
+ever calling its write functions. Deciding whether an advisory applies costs more
+than the fix, and is wrong in the direction that matters when it is wrong. A patch
+in a version range already allowed costs minutes, and the cost of deferring it grows
+with every release that lands on top of it, because the eventual jump gets larger
+and riskier. So the rule used here is: when a fixed version exists, take it, prove
+it with the tests, and record what was found.
+
+### False positives: refactor the code, even when you know it is safe
+
+Not everything a tool reports is a defect, and this module met several. Pylint's
+type inference could not see through `sqlalchemy.func`, so every `func.count()`
+reported "not callable", and it read `sessionmaker[Session]` as subscripting
+something that is not subscriptable (23 messages in all, CHG-16). Snyk Code
+flagged `{"user": "DB_USER", "password": "DB_PASSWORD"}` as a hardcoded password,
+when the string is the *name* of an environment variable (CHG-21). This project's
+own secrets scanner had the same trouble with the same line. None of these was a
+vulnerability, and in each case the code was changed anyway. The reasons are the
+point:
+
+- **The investigation recurs; the fix happens once.** Each time a scan runs, a
+  reviewer, a teammate, or the same author six months later must re-read the
+  finding, re-trace the code, and re-conclude "false positive". That cost is paid on
+  every run, for as long as the code exists. Reshaping the code once removes the
+  recurring cost, and reshaping it with a test that encodes the pattern (here, an
+  AST check that no `"password"` key holds a string literal) means it cannot come
+  back unnoticed.
+- **A standing red result stops being read.** A scan with a known, accepted finding
+  trains everyone to look past red. A clean baseline means a new finding is news, and
+  that signal is worth more than the finding was.
+- **Suppression hides more than the finding.** An inline `# pylint: disable` or a
+  scanner ignore rule silences the line for every future reason as well. A real
+  problem that later appears on that line is invisible. That is why this project has
+  zero inline disables and a test that fails if one is added (decision D6).
+- **If a tool can misread it, so can a person.** A dict that pairs the key
+  `"password"` with a string literal does look like a credential at a glance. A pair
+  of variable names, `("DB_USER", "DB_PASSWORD")`, says what the code means. The
+  refactor was a small clarity improvement as well as a way to quiet a scanner.
+
+**The limit, so this is not mistaken for appeasing tools.** The change must be
+behavior-neutral, tested, and an improvement or at worst neutral for the reader. The
+same scan raised a LOW path-traversal note on `python3 src/load_data.py <file>`,
+and that was *not* refactored away. The path is chosen by the person running the
+tool on their own machine, so there is no attacker to defend against, and adding a
+meaningless check would be security theater: code that exists to satisfy a scanner,
+costs the reader something, and gives false assurance. That finding is documented
+as an accepted risk, with the reasoning, in `report/snyk_triage.md`. The test for
+whether to change the code is whether the result is better code, not whether the
+tool goes quiet.
+
+## CI
+
+`.github/workflows/ci.yml` runs on every push and every pull request, on any branch, and has four jobs that fail
+independently so a red check names the requirement that broke ([CHG-19](#chg-19)).
+
+| Job | Enforces |
+| --- | --- |
+| `lint` | Pylint scores exactly 10.00 on `src/` |
+| `dependency-graph` | pydeps and Graphviz build a valid `dependency.svg` (uploaded as an artifact) |
+| `snyk` | no dependency finding at or above high across all 70 pinned packages; Snyk Code report-only; skipped with a notice when no token is available |
+| `test` | the full suite at 100% coverage on **pip and uv**, against PostgreSQL 16 with the same two least-privilege roles as production |
+
+The first run found three tests that passed locally only because of a developer's `.env`; the suite no longer reads it
+([A9.6](#phase-9-amendments)). `actions_success.png` is the screenshot of the green run, and
+[`tests/test_ci_config.py`](tests/test_ci_config.py) fails if a gate is removed from the workflow.
+
+## Testing
+
+```bash
+pytest                      # the whole suite: 605 tests, coverage gate 100% on src/
+```
+
+There is no marker selection: every test runs. Every test carries one of six markers (`web`, `buttons`, `analysis`,
+`db`, `integration`, `security`), and a collection hook stops the run if one does not ([CHG-18](#chg-18)). The suite
+is hermetic: it never reads your `.env` (only `TEST_DATABASE_URL` and `TEST_ADMIN_DATABASE_URL`, by name), so a local
+run sees what CI sees. The `db` and `integration` tests need those two URLs to name a disposable database, as the
+runtime and owner accounts; every other test runs with no database at all.
+
+| Test file | What it proves |
+| --- | --- |
+| `test_sql_guard.py`, `test_db_safety.py` | no SQL built from strings, only composed statements execute, every SELECT has a bounded `LIMIT` |
+| `test_sqli_malicious.py`, `test_applicant_search.py` | the search endpoint's contract, and 51 hostile inputs never produce a 500 or change a row |
+| `test_least_privilege.py`, `test_database_scripts.py` | the two accounts are what the database says they are; no cleartext password is sent or documented |
+| `test_query_data.py`, `test_orm_queries.py` | answers equal Module 4's over all 30,000 rows; the ORM's compiled SQL is Module 4's plus one `LIMIT` |
+| `test_config.py`, `test_packaging.py` | configuration precedence and error messages; the lock covers `setup.py` and is fully pinned |
+| `test_lint_policy.py`, `test_gate_checkers.py` | `.pylintrc` relaxes nothing; the secrets, register, leak and gate checks reject what they should |
+| `test_dependency_graph.py`, `test_snyk_scan.py`, `test_ci_config.py` | the graph is current, the Snyk fixes stay fixed, CI keeps its gates |
+| the Module 4 files, updated | Flask page, buttons, formatting, loader, pull pipeline, scraper |
+
+No test touches the internet, launches a browser, runs a real scrape, or calls `sleep()`.
+
+## Architecture
+
+Three layers. The published Sphinx documentation goes further.
+
+**Web layer.** `src/app.py` exposes `create_app(services=None, *, database_url=None, testing=False)`. Every outward
+dependency arrives in one frozen `Services` object (`scraper`, `loader`, `query`, `runner`, `search`), each optional
+and defaulting to the real implementation ([CHG-09](#chg-09)), so `python3 src/app.py` is unchanged from Module 3 while
+a test passes fakes and reaches no network and no database.
+
+| Route | Method | Responses |
+| --- | --- | --- |
+| `/analysis` (and `/`) | `GET` | `200` the page; `503` the page with an error notice |
+| `/pull-data` | `POST` | `200 {"ok": true, "inserted": n}`; `202 {"ok": true, "started": true}`; `409 {"busy": true}`; `500 {"ok": false, "error": ...}` |
+| `/update-analysis` | `POST` | `200 {"ok": true, "total": n}`; `409 {"busy": true}`; `503 {"ok": false, "error": ...}` |
+| `/api/applicants` | `GET` | `200` rows with the effective `limit`; `400` rejected input; `503` database unreachable; see [CHG-08](#chg-08) |
+
+Any unhandled error answers `500 {"ok": false, "error": ...}` without the exception's text ([CHG-10](#chg-10)). The page
+carries `data-testid="pull-data-btn"` and `data-testid="update-analysis-btn"`, and every analysis value is labelled
+`Answer:` with percentages to two decimals.
+
+**ETL layer.** `scrape.py` renders Grad Café pages in Chrome, `clean.py` parses them, and `pull_data.py` orchestrates
+them, standardizes with the LLM, and hands records to the loader. `pull_data.run_pull(scraper, loader)` is the seam
+the route and the tests share.
+
+**Database layer.** `load_data.py` owns settings, schema and insert; `models.py` maps the table for SQLAlchemy;
+`query_data.py` and `orm_queries.py` answer the same questions in composed SQL and through the ORM;
+`db_safety.py` and `applicant_search.py` hold the limit, input checks and search. The import structure is in
+[dependency.svg](dependency.svg).
+
+## Repository structure
+
+```text
+module_5/
+├── src/                  application code, flat modules (app, applicant_search, clean, db_safety, load_data,
+│                         models, orm_queries, pull_data, query_data, scrape), templates/, static/
+├── tests/                605 tests; conftest.py holds fixtures and the marker policy; snapshots/ holds the
+│                         Module 4 answers and compiled SQL the parity tests compare against
+├── sql/                  roles.sql, grants.sql, migrate_ownership.sql
+├── scripts/              gate.sh and its checks, snyk_scan.sh, scram_verifier.py, regen_lock.sh,
+│                         fresh_install_check.sh, render_query_sql.py, capture_m4_snapshots.py
+├── report/               build_report.py (the PDF), dependency_summary.md, snyk_triage.md
+├── snyk/                 Snyk scans before the fixes and for the marker-excluded packages
+├── docs/                 Sphinx project            data/   llm_extend_applicant_data.json (the loader's input)
+├── llm_hosting/          Pull Data's LLM standardizer (its own environment; see above)
+├── setup.py  requirements.txt  pytest.ini  .pylintrc  .editorconfig  .env.example
+├── CHANGES.md  PLAN.md  README.md
+└── evidence: pylint_report.txt  coverage_summary.txt  dependency.svg  snyk_report.json  snyk_code_report.txt
+              privileges.txt  privileges.png  snyk-analysis.png  snyk-code-analysis.png  actions_success.png
+              module_5_report.pdf
+../.github/workflows/    ci.yml (Module 5), tests.yml (Module 4, untouched)
+```
+
+`src/` modules import each other flatly (`from models import ...`) and resolve through the editable install
+([CHG-01](#chg-01)); `src/` is deliberately not a package, to keep parity with Module 3.
+
+# Reference: what changed and why
 
 ## Changes from Module 4
 
@@ -885,8 +1348,49 @@ This list mirrors them.
   1 local-count message (CHG-15); 2 `too-few-public-methods` (CHG-17); 1 useless
   return (A6.5). Phase 3 had already removed the f-string line-length hits.
 
+### Phase 10 amendments
+
+- **A10.4 The README was restructured for the reader.** It had grown with the build: a status section that had gone
+  stale, a Module 4 checklist, and a Module 4 testing section. It now opens with a table of what to verify and the
+  command that verifies it, then how to get the environment running, then the security tooling, CI, tests and
+  architecture, and only then the reference material (the Change Register detail, the amendments, the development
+  process, and the carried-over application reference as an appendix). Amendment A2.8 below describes an
+  earlier first pass and is kept as history.
+
+- **A10.1 Cruft removed.** Seven tracked files that nothing reads were deleted
+  (all remain in git history and in `module_4/`): `github.txt` (a Module 4 note with the
+  repository URL), `check_llm.py` and `run_llm.sh` (Module 2 helper scripts for the
+  standardizer, referenced by nothing), `llm_hosting/all` (a captured shell error
+  message, committed by accident), `sql/gre_check.sql` and `sql/questions_scratch.sql`
+  (Module 3 investigation scratch, executed by nothing), and `data/applicant_data.json`
+  (15 MB, the Module 2 pre-LLM intermediate: no code or test reads it, and
+  `llm_extend_applicant_data.json` is a superset). Kept on purpose, because
+  something depends on them: `llm_hosting/` (Pull Data's standardizer), `docs/`,
+  `data/llm_extend_applicant_data.json` (the loader's default and the parity test), and the
+  snapshots. The suite was re-run after the deletions: 604 passed, 100%.
+- **A10.2 `coverage_summary.txt` is Module 5's.** It was Module 4's file (102 tests);
+  it is now the output of `pytest > coverage_summary.txt`.
+- **A10.3 The report is built by a script.** `report/build_report.py` assembles
+  `module_5_report.pdf` from the committed evidence, so it can be regenerated and
+  its figures are read from the repository and not retyped.
+
 ### Phase 9 amendments
 
+- **A9.6 The first CI run found three tests that depended on a developer's `.env`.**
+  Three of four job types were green on the first push (`lint`, `dependency-graph`,
+  `snyk`), and both `test` legs failed with 601 passed and 3 failed, which is what a clean
+  machine is for. Two tests needed `DB_HOST`, which only a local `.env` supplied. A
+  third compared the full third-party graph, which differs between a Mac and Linux.
+  The suite is now hermetic: `conftest.py` switches the `.env` loader off and takes
+  only the two test-database URLs from it, by name, so a local run sees what CI sees;
+  the two tests set their own configuration; and the graph test compares every import
+  the project itself makes. The least-privilege tests, which depend on the CI role
+  bootstrap, passed on the first run.
+
+- **A9.7 CI runs on every push and pull request.** The plan filtered the workflow to
+  changes under `module_5/`. The assignment says it "runs on every push/PR", so the
+  filter was removed, and `test_the_workflow_runs_on_every_push_and_pull_request` fails if
+  a branch or path filter is added back.
 - **A9.1 The gate has two stages, because a green run cannot exist before the push.**
   `scripts/gate.sh 9` first checks everything that can be checked offline: the
   workflow's tests and the standard gate. The workflow is then committed and pushed.
@@ -971,573 +1475,106 @@ This list mirrors them.
 - **A7.5 BeautifulSoup is beyond the edge.** The graph stops two imports from
   `app.py`, and `clean` is two away, so its parser is the first package left off.
 
-## Deliverables checklist
-
-From the assignment's "Final Deliverables" and its expected directory
-structure. A box is ticked only when the item exists in the repository now;
-the rest name the phase that produces them.
-
-- [x] **`module_5/` carried over from Module 4**, the working application and
-      its tests, with Module 4 itself left untouched.
-- [x] **`setup.py`** (Phase 1), [setup.py](setup.py): flat modules, runtime
-      dependencies, and a `dev` extra.
-- [x] **`requirements.txt`** (Phase 1), [requirements.txt](requirements.txt):
-      a fully pinned lock of 70 packages including `pylint` and `pydeps`,
-      generated from `setup.py` by `scripts/regen_lock.sh`.
-- [x] **`.env.example`** (Phase 2), [.env.example](.env.example), with `.env`
-      gitignored.
-- [x] **`pytest.ini`**, [pytest.ini](pytest.ini).
-- [x] **Fresh install by pip and by uv** (Phase 1), proved by
-      `scripts/fresh_install_check.sh`; see [Fresh Install](#fresh-install).
-- [x] **SQL injection defenses** (Phases 3 and 4): composed SQL, bound
-      parameters, construction separated from execution; see
-      [CHG-05](#chg-05) and [CHG-08](#chg-08).
-- [x] **`LIMIT` on every query, with an enforced maximum** (Phases 3 and 4);
-      see [CHG-07](#chg-07).
-- [x] **Least-privilege database role** (Phase 5): `sql/roles.sql`,
-      `sql/grants.sql`, `sql/migrate_ownership.sql`, [privileges.txt](privileges.txt),
-      and the [privileges.png](privileges.png) screenshot of `\dp applicants`.
-- [x] **10/10 Pylint evidence**, [pylint_report.txt](pylint_report.txt) (Phase 6).
-      The command is documented under [Security tooling](#security-tooling).
-- [x] **`dependency.svg`** (Phase 7): built with pydeps and Graphviz, with the
-      7-sentence explanation in [report/dependency_summary.md](report/dependency_summary.md).
-- [x] **`snyk-analysis.png`**, and for extra credit **`snyk-code-analysis.png`**
-      (Phase 8): screenshots of `scripts/snyk_scan.sh` and `snyk code test src`, with
-      `snyk_report.json`, `snyk_code_report.txt`, and the triage in
-      [report/snyk_triage.md](report/snyk_triage.md).
-- [x] **`.github/workflows/ci.yml`** (Phase 9), four jobs; see [CHG-19](#chg-19).
-- [ ] **`actions_success.png`**: a screenshot of the green `module-5-ci` run. The file
-      in this folder is still Module 4's, and is replaced once the run is green.
-- [ ] **`coverage_summary.txt`**: the committed file is still Module 4's
-      (102 tests); it is regenerated in Phase 10.
-- [ ] **`module_5_report.pdf`** (Phase 10).
-- [ ] **Canvas zip and GitHub push, matching** (Phase 11).
-
-## Overview
-
-This module hardens the Grad Café analytics service built in Module 3 and
-tested in Module 4. The application is unchanged in purpose: it loads scraped
-applicant data into PostgreSQL, analyzes it with raw SQL and the SQLAlchemy
-ORM, and serves an analysis page that can pull newly posted entries on demand.
-Module 5 adds software assurance around it: the code is packaged and its
-environment pinned, credentials come only from the environment, SQL is
-composed and parameterized, reads are bounded, the database account is
-least-privilege, and static analysis, a dependency graph, and a supply-chain
-scan run in CI.
-
-| Area | What Module 5 does | Where | Status |
-| --- | --- | --- | --- |
-| Packaging | `setup.py` with flat modules; editable install | `setup.py` | done |
-| Reproducible environment | pinned lock, installs with pip and uv | `requirements.txt`, `scripts/` | done |
-| Secrets | `DB_*` variables, `.env.example`, sanitized connection errors | `src/load_data.py`, `.env.example` | done |
-| SQL injection defenses | composed, parameterized SQL, built apart from execution | `src/query_data.py`, `src/load_data.py`, `src/applicant_search.py` | done |
-| `LIMIT` enforcement | every query bounded, one definition of the maximum, clamped 1 to 100 | `src/db_safety.py` | done |
-| Searchable endpoint | `GET /api/applicants` | `src/applicant_search.py` | done |
-| Least privilege | owner and runtime roles, `SELECT` and `INSERT` only | `sql/` | done |
-| Pylint 10.00/10 | fixes in code, no inline disables, one classification in `.pylintrc` | `src/`, `pylint_report.txt` | done |
-| Dependency graph | pydeps and Graphviz; every module and package, no import cycles | `dependency.svg`, `report/` | done |
-| Snyk | dependency and code scans, all 70 pinned packages, findings fixed or triaged | `snyk_report.json`, `snyk/`, `report/snyk_triage.md` | done |
-| CI | lint, graph, Snyk, and tests as four jobs; pip and uv; two least-privilege roles | `.github/workflows/ci.yml` | done (see the Phase 9 amendments for the run) |
-
-Every change made to the Module 4 code, and why, is recorded in the
-[Change Register](CHANGES.md) and explained under
-[Changes from Module 4](#changes-from-module-4). Changes Module 4 made to the
-Module 3 code are described under
-[Changes to carried-over code](#changes-to-carried-over-code).
-
-## Repository structure
-
-```text
-module_5/
-├── src/                        application code, flat modules
-│   ├── app.py                  Flask factory, analysis page, button routes
-│   ├── pull_data.py            pull orchestration and its injection seams
-│   ├── scrape.py               Grad Café page fetching (Module 2)
-│   ├── clean.py                page parsing into records (Module 2)
-│   ├── load_data.py            connection settings, schema, and loader
-│   ├── models.py               SQLAlchemy Applicant model and session factory
-│   ├── query_data.py           raw SQL analyses and the output formatters
-│   ├── orm_queries.py          the same analyses through the ORM
-│   ├── db_safety.py            query limits and input checks
-│   ├── applicant_search.py     GET /api/applicants search
-│   ├── templates/index.html    the analysis page
-│   └── static/style.css        page styles
-├── tests/                      all test code; conftest.py holds the fixtures
-│   ├── snapshots/              Module 4 answers and compiled SQL, for parity tests
-│   ├── test_dependency_graph.py  dependency.svg is current and its claims hold
-│   ├── test_least_privilege.py the two accounts, as the database sees them
-│   ├── test_applicant_search.py    the endpoint's contract and validation
-│   ├── test_sqli_malicious.py  the malicious-input matrix, against a real database
-│   ├── test_db_safety.py       limit clamping and input validation
-│   ├── test_sql_guard.py       no string-built SQL, composed-only, every SELECT limited
-│   ├── test_config.py          configuration and secrets handling
-│   ├── test_packaging.py       packaging and the lock
-│   ├── test_lint_policy.py     every test carries a marker
-│   ├── test_gate_checkers.py   the gate's own checkers
-│   └── test_*.py               the Module 4 suite, updated
-├── sql/                        roles.sql, grants.sql, migrate_ownership.sql
-├── scripts/                    gate.sh, change-register and secrets checks,
-│                               lock regeneration, fresh-install check
-├── dependency.svg              the import graph, from pydeps and Graphviz
-├── snyk_report.json            Snyk dependency scan, after remediation
-├── snyk_code_report.txt        Snyk Code scan, after remediation
-├── snyk/                       the scans before the fixes, and the marker-excluded packages
-├── snyk-analysis.png, snyk-code-analysis.png   screenshots of both scans
-├── report/                     report source: the graph explanation (more in Phase 10)
-├── docs/                       Sphinx project
-├── data/                       bulk JSON input, never imported
-├── llm_hosting/                instructor-provided LLM standardizer
-├── setup.py                    packaging and dependency source of truth
-├── requirements.txt            pinned lock generated from setup.py
-├── .env.example                every environment variable, placeholders only
-├── pytest.ini                  markers, strict markers, the coverage gate
-├── CHANGES.md                  the Change Register
-├── PLAN.md                     the execution plan and Gate Log
-└── README.md
-```
-
-`src/` modules import each other flatly (`from models import ...`). They
-resolve through the editable install of `setup.py` (see
-[CHG-01](#chg-01)); `src/` is deliberately not a package, because converting it
-would break parity with Module 3, where these files sat at the top level.
-
-Not yet present, and produced in later phases:
-`actions_success.png`, `module_5_report.pdf`, and
-`../.github/workflows/ci.yml`.
-
-## Installation and setup
-
-### PostgreSQL
-
-A running PostgreSQL server and a database are required. The loader creates the
-table but not the database.
-
-```bash
-createuser --superuser postgres   # only if the role does not exist (Homebrew installs)
-psql -d postgres -c "ALTER USER postgres PASSWORD 'choose-one';"
-createdb gradcafedb
-```
-
-Homebrew's `initdb` creates a superuser named after the macOS account rather
-than a `postgres` role, so on those installs the role must be created by hand.
-
-For running the test suite, create a separate, disposable database. Tests
-truncate the applicants table, so they must never point at the real one.
-
-```bash
-createdb gradcafe_test
-```
-
-### Connection settings
-
-Copy `.env.example` to `.env` and fill it in. `.env` is gitignored, and
-`python-dotenv` loads it from `module_5/` if it exists; variables already set
-in the shell take precedence. Both the psycopg code and the ORM read:
-
-```bash
-DB_HOST=localhost
-DB_PORT=5432
-DB_NAME=gradcafedb
-DB_USER=gradcafe_app          # runtime account: the web app and Pull Data
-DB_PASSWORD=change-me
-# DB_OWNER_USER / DB_OWNER_PASSWORD: schema setup and bulk load only
-```
-
-`DATABASE_URL` is an optional single-URL override, used by CI and tests. It
-takes precedence over `DB_*`. The test suite reads `TEST_DATABASE_URL`, a
-disposable database it truncates. The `PG*` variables Module 3 used are no
-longer read; see [CHG-03](#chg-03).
-
-Details worth knowing:
-
-- A URL spelled `postgresql://` has the `+psycopg` driver supplied
-  automatically. A bare `postgresql://` would otherwise send SQLAlchemy looking
-  for psycopg2, which this project does not install.
-- User names and passwords are percent-decoded, so a password containing `@` or
-  `/` is safe to carry in the URL.
-- Tests override the setting through `create_app(database_url=...)` rather than
-  through the environment, so a test run cannot reach the development database
-  by accident.
-
-No credentials, hosts, or machine-specific paths are hard-coded anywhere, and
-`.env` is never committed.
-
-### Environment variables
-
-Every variable the code reads, all set in `.env` (see `.env.example`) or the
-shell. A missing required variable raises an error that names the variable and
-never shows a value.
-
-| Variable | Used by | Required | Meaning |
-| --- | --- | --- | --- |
-| `DB_HOST` | every role | yes, unless `DATABASE_URL` is set | PostgreSQL host |
-| `DB_PORT` | every role | yes, unless `DATABASE_URL` is set | PostgreSQL port |
-| `DB_NAME` | every role | yes, unless `DATABASE_URL` is set | database name |
-| `DB_USER`, `DB_PASSWORD` | the `app` role: web app, Pull Data, ORM | yes, unless `DATABASE_URL` is set | runtime account |
-| `DB_OWNER_USER`, `DB_OWNER_PASSWORD` | the `owner` role: schema setup and bulk load | only for the owner role | owner account; keep out of the running app's environment |
-| `DATABASE_URL` | every role | no | single-URL override; beats `DB_*`, loses to an explicit argument |
-| `TEST_DATABASE_URL` | the test suite | for `db` and `integration` tests | disposable database the tests truncate |
-| `PORT` | `src/app.py` | no | port for the development server (default 8080) |
-
-All are read in `src/load_data.py` (`get_db_config`), `src/models.py`
-(`build_url`), and `tests/conftest.py`. The owner role is wired up with the
-least-privilege database in Phase 5; until then the runtime variables name the
-account you already use.
-
-### Fresh Install
-
-One environment covers the application, the ETL code, the test suite with
-coverage, linting, the dependency graph, and the Sphinx build. Dependencies are
-declared once, in `setup.py`; `requirements.txt` is the pinned lock generated
-from it. Python 3.14 is required (3.14.6 is what the project is developed and
-tested on). From a fresh clone, either way works:
-
-**pip**
-
-```bash
-cd module_5
-python3.14 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-pip install -e . --no-deps
-```
-
-**uv**
-
-```bash
-cd module_5
-uv venv -p 3.14 .venv
-source .venv/bin/activate
-uv pip sync requirements.txt
-uv pip install -e . --no-deps
-```
-
-The second line of each recipe is the editable install of the project itself.
-It is what lets the flat `src/` modules import each other from anywhere, and it
-is the only supported way to install the project: a plain `pip install .` would
-not carry `src/templates/` and `src/static/`, because flat modules have no
-package to hold package data. See [CHG-01](#chg-01) and [CHG-02](#chg-02).
-
-`scripts/fresh_install_check.sh` proves both recipes. It copies the committed
-tree into a temporary directory with no `.venv` and no `.env`, runs each recipe
-there, imports every module from outside `src/`, runs `pylint --version` and
-`pydeps --version`, and runs the offline tests. To add or change a dependency,
-edit `setup.py` and run `scripts/regen_lock.sh`; do not edit the lock by hand.
-
-The project targets Python 3.14. Module 4's CI workflow pins 3.14.6 exactly
-(Module 5's workflow follows in Phase 9), and Read the Docs offers major.minor
-only, so it pins 3.14.
-
-### Database setup
-
-Run once, as a PostgreSQL superuser, from `module_5/`. `OWNER_PW` and `APP_PW`
-are passwords you choose; they go into `.env` and nowhere else. The scripts
-never receive a password. Each one is first turned into a SCRAM-SHA-256
-verifier, which PostgreSQL stores as it is, and handed over in the
-environment. A password on a `psql` command line shows in the process list, and
-one inside a statement is written to the server log if the statement fails, so
-neither is used. See [Credentials were checked for leaks](#credentials-were-checked-for-leaks).
-
-```bash
-# 1. The two roles, and a database only they can connect to
-export OWNER_VERIFIER=$(printf %s "$OWNER_PW" | python3 scripts/scram_verifier.py)
-export APP_VERIFIER=$(printf %s "$APP_PW" | python3 scripts/scram_verifier.py)
-psql -d postgres -v db=gradcafedb -f sql/roles.sql
-
-# 2a. A new database: the owner creates the table and loads the data
-DB_OWNER_USER=gradcafe_owner DB_OWNER_PASSWORD="$OWNER_PW" python3 src/load_data.py
-psql -d gradcafedb -f sql/grants.sql
-
-# 2b. An existing database: move the table under the owner instead
-psql -d gradcafedb -f sql/migrate_ownership.sql
-```
-
-Then set `DB_USER=gradcafe_app` and `DB_PASSWORD` in `.env`. Leave the owner's
-credentials out of it, and give them to the loader only for the moment you run
-it, as above. For the test database, repeat step 1 with `-v db=gradcafe_test`,
-create the table as the owner, apply `sql/grants.sql`, and set
-`TEST_DATABASE_URL` and `TEST_ADMIN_DATABASE_URL`. See [CHG-12](#chg-12) for
-what each account may do and why.
-
-### Credentials were checked for leaks
-
-**Why this section exists.** Phase 5 creates real accounts with real
-passwords, and a security control that is only asserted is an unverified claim.
-Module 5 is about assurance, which means evidence that a property holds and not
-confidence that it should. At the go-ahead for the live setup, the instruction
-was to make sure no credential was being logged, to test that it was not, and to
-document that the check was done. That instruction is the reason for everything
-below. It also found two leaks the original plan would have produced, which is
-the argument for checking: they were invisible until someone looked at the
-server's own settings.
-
-A password can leak by more routes than a committed file, so the setup was
-designed around four of them and then checked directly, with the real values,
-rather than assumed safe.
-
-| Route | What would have happened | What is done instead |
-| --- | --- | --- |
-| The process list | `psql -v owner_pw=...` puts the password on a command line any local user can read | Passwords are never arguments. `roles.sql` reads them from the environment, and `scram_verifier.py` reads one from standard input |
-| The server log | PostgreSQL writes the text of a statement that **fails** to its log (`log_min_error_statement` is `error` here), and this install's log file is readable by every local user, so a failed `ALTER ROLE ... PASSWORD 'secret'` would have published the password | The statement carries a SCRAM-SHA-256 verifier, a salted hash that PostgreSQL stores unchanged. The cleartext never reaches the server |
-| Shell and psql history | A password typed into a command is recorded in `~/.zsh_history` or `~/.psql_history` | The passwords were generated in memory, never typed, and never put on a command line |
-| Documentation | A README that says `-v owner_pw=...` teaches the leak | A test fails if the setup instructions mention a cleartext password argument |
-
-**Checked, not assumed.** After provisioning, the real passwords were searched
-for in the PostgreSQL log, `~/.zsh_history`, `~/.bash_history`, `~/.psql_history`,
-every file in the repository, the scratch directory, and everything `psql` and
-Python printed during setup: **no match anywhere**. A cleartext login also works
-against the stored verifier, which shows the verifier approach is sound and not
-a role nobody can log in as.
-
-**Why the check is permanent and not a one-time look.** A one-time search proves
-the state of the world at that moment and says nothing about the next commit.
-The ways it can regress are ordinary: someone pastes a working command into the
-README, a new log line prints a connection string, a CI step echoes the
-environment, a debugging session commits a `.env` fragment. None of these needs
-anyone to be careless about security, only to be busy. So the check runs on every
-gate, where a leak stops the commit, and it searches git history as well as the
-tree, because deleting a leaked file does not remove it from the repository. This
-is the same idea as the rest of the module: Pylint at 10.00, the SQL guard, and
-the least-privilege tests all move a failure to the earliest and cheapest point,
-before it ships.
-
-**Checked on every gate from Phase 5 on.** `scripts/check_credential_leaks.py`
-reads the passwords out of `.env` and searches the working tree, every commit in
-git history (so a leak that was later deleted still fails), the server log, and
-the shell history files. It prints counts and labels only, and never a password:
-git receives its search patterns from a private temporary file, not an argument.
-Its own tests plant a password in a file, a log, and a deleted commit and require
-that each is found, and require that the output never contains it. Each of those
-tests was also confirmed to fail against a deliberately broken copy of the check.
-`scripts/check_secrets.py` additionally scans `sql/` for a password literal.
-
-**What this does not cover.** The cleartext passwords exist in `.env`, which is
-gitignored and mode 600, because the application and the test fixtures need
-them. The owner's password is in `TEST_ADMIN_DATABASE_URL` for the same reason.
-The verifiers sit in PostgreSQL's `pg_authid`, readable only by superusers. A
-screen share, a backup of the data directory, or a process that can read another
-process's environment is outside what a repository can protect.
-
-### LLM standardizer setup
-
-The standardizer keeps its own environment, as in Module 2, because it depends
-on `llama-cpp-python`, which compiles native code. Pull Data runs it in that
-environment.
-
-```bash
-cd module_5/llm_hosting
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-```
-
-If this environment is missing, Pull Data stops with a message saying so and
-adds nothing to the database. **No test requires it**: the test suite injects a
-fake scraper and never invokes the standardizer.
-
-### Browser setup for Pull Data
-
-Grad Café sits behind Cloudflare. As in Module 2, the verification must be
-cleared once, by hand, in the persistent Chrome profile the scraper uses
-(`~/.gradcafe-chrome-profile`).
-
-**No test launches a browser.** `pull_data.py` takes its driver as an injected
-argument, so the suite supplies a stand-in instead.
-
-## How to run
-
-All commands run from `module_5/` with the main environment active.
-
-### The application
-
-```bash
-python3 src/app.py        # then open http://127.0.0.1:8080/analysis
-```
-
-Port 8080 rather than Flask's default 5000, which macOS's AirPlay Receiver
-occupies; set `PORT` to override.
-
-### The command-line programs
-
-```bash
-python3 src/load_data.py      # create the table and load the bulk data
-python3 src/query_data.py     # raw SQL results to the console
-python3 src/orm_queries.py    # SQLAlchemy results to the console
-python3 src/pull_data.py      # one pull, without the web page
-python3 src/models.py         # verify the model against the live table
-```
-
-`load_data.py` prints a summary on completion. Running it a second time is safe
-and changes nothing:
-
-```text
-Read 30000 records: 30000 inserted, 0 already present, 0 skipped (no result id in url)
-Read 30000 records: 0 inserted, 30000 already present, 0 skipped (no result id in url)
-```
-
-To inspect the table: `psql -d gradcafedb -c '\d+ applicants'` shows columns,
-types, and descriptions.
-
-### The tests
-
-See [Testing](#testing).
-
-## Security tooling
-
-The commands are fixed here so that a reader can reproduce each result. All run
-from `module_5/` with the environment from [Fresh Install](#fresh-install)
-active.
-
-| Tool | Command | Reads as | Status |
-| --- | --- | --- | --- |
-| Pylint | `pylint --rcfile=.pylintrc --fail-under=10 src` | must print `rated at 10.00/10` with no message lines | **10.00/10**, committed as `pylint_report.txt` (Phase 6) |
-| pydeps | `pydeps src/app.py --noshow -T svg -o dependency.svg --max-module-depth=1` | needs Graphviz's `dot` on the path; arrows point from an imported module to its importer | done: [dependency.svg](dependency.svg), explained in [report/dependency_summary.md](report/dependency_summary.md) |
-| Snyk, dependencies | `scripts/snyk_scan.sh` (it runs `snyk test --file=requirements.txt --package-manager=pip --command=python` on the pinned lock; see below) | lists known vulnerabilities in the pinned packages; `✔ no vulnerable paths found` is clean | done: 22 findings fixed, 0 remain |
-| Snyk Code | `snyk code test src` | static analysis of `src/` (extra credit) | done: 1 LOW accepted, see the triage |
-
-Pylint is run on `src/` only, as the assignment requires, and the project
-carries no inline `# pylint: disable`; findings are fixed in the code. The one
-configuration file, `.pylintrc`, says where the source lives and relaxes no
-rule.
-
-Two scripts guard the repository itself: `scripts/check_secrets.py` fails if a
-credential-shaped literal appears in `src/` or `tests/`, and
-`scripts/gate.sh` runs the checks above together with the tests before a phase
-may be committed.
-
-### Upgrading dependencies when a vulnerability is known
-
-A pinned lock is a snapshot of what was true on the day it was generated. Pinning
-is what makes an environment reproducible, and it also freezes whatever flaws that
-version has, because advisories are published *after* a release. A lock that was
-clean when it was written is not clean forever, which is why the scan is run
-against the lock, repeatedly, and not once.
-
-**What the scan found here.** 22 entries, which are 4 distinct issues in 2 of the 70
-pinned packages. Snyk lists one entry per dependency path, so `urllib3`'s three
-issues appear 21 times.
-
-| Package | Issue | Severity | Why it matters here |
-| --- | --- | --- | --- |
-| `urllib3` 2.7.0 | Improper Certificate Validation | High | A client could accept a certificate it should reject, which is what lets a machine in the middle impersonate a server |
-| `urllib3` 2.7.0 | Allocation of Resources Without Limits or Throttling | High | A hostile response can exhaust memory or CPU, a denial of service |
-| `urllib3` 2.7.0 | Infinite loop | Medium | A request can hang a process |
-| `python-dotenv` 1.0.1 | Symlink Attack | Medium | Rewriting a `.env` file can be redirected through a symlink to another file |
-
-**What was done, and why it was the right call.** `urllib3` went to 2.8.0 and
-`python-dotenv` to 1.2.4, and exactly two lines of the lock changed. Both versions
-were already permitted by the compatible-release ranges in `setup.py`, so a
-plain reinstall would not have taken them: a lock does not move on its own. The
-floors were raised (`urllib3~=2.8`, `python-dotenv~=1.2`) so that regenerating the
-lock can never go backward, and a test, `test_remediated_versions_stay_remediated`,
-fails if it does. The full suite was then re-run on the new versions, because a
-dependency bump is a code change that the tests, not the version number, vouch for.
-It passed, and Snyk now reports no findings in any of the 70 packages.
-
-**Why upgrade instead of arguing the flaw is unreachable.** The honest reachability
-analysis for each of these is short and not reassuring. `urllib3` is the HTTP client
-under Selenium, so it carries the project's browser traffic. `python-dotenv` is
-only read here, so its flaw is out of reach, but that conclusion depends on nobody
-ever calling its write functions. Deciding whether an advisory applies costs more
-than the fix, and is wrong in the direction that matters when it is wrong. A patch
-in a version range already allowed costs minutes, and the cost of deferring it grows
-with every release that lands on top of it, because the eventual jump gets larger
-and riskier. So the rule used here is: when a fixed version exists, take it, prove
-it with the tests, and record what was found.
-
-### False positives: refactor the code, even when you know it is safe
-
-Not everything a tool reports is a defect, and this module met several. Pylint's
-type inference could not see through `sqlalchemy.func`, so every `func.count()`
-reported "not callable", and it read `sessionmaker[Session]` as subscripting
-something that is not subscriptable (23 messages in all, CHG-16). Snyk Code
-flagged `{"user": "DB_USER", "password": "DB_PASSWORD"}` as a hardcoded password,
-when the string is the *name* of an environment variable (CHG-21). This project's
-own secrets scanner had the same trouble with the same line. None of these was a
-vulnerability, and in each case the code was changed anyway. The reasons are the
-point:
-
-- **The investigation recurs; the fix happens once.** Each time a scan runs, a
-  reviewer, a teammate, or the same author six months later must re-read the
-  finding, re-trace the code, and re-conclude "false positive". That cost is paid on
-  every run, for as long as the code exists. Reshaping the code once removes the
-  recurring cost, and reshaping it with a test that encodes the pattern (here, an
-  AST check that no `"password"` key holds a string literal) means it cannot come
-  back unnoticed.
-- **A standing red result stops being read.** A scan with a known, accepted finding
-  trains everyone to look past red. A clean baseline means a new finding is news, and
-  that signal is worth more than the finding was.
-- **Suppression hides more than the finding.** An inline `# pylint: disable` or a
-  scanner ignore rule silences the line for every future reason as well. A real
-  problem that later appears on that line is invisible. That is why this project has
-  zero inline disables and a test that fails if one is added (decision D6).
-- **If a tool can misread it, so can a person.** A dict that pairs the key
-  `"password"` with a string literal does look like a credential at a glance. A pair
-  of variable names, `("DB_USER", "DB_PASSWORD")`, says what the code means. The
-  refactor was a small clarity improvement as well as a way to quiet a scanner.
-
-**The limit, so this is not mistaken for appeasing tools.** The change must be
-behavior-neutral, tested, and an improvement or at worst neutral for the reader. The
-same scan raised a LOW path-traversal note on `python3 src/load_data.py <file>`,
-and that was *not* refactored away. The path is chosen by the person running the
-tool on their own machine, so there is no attacker to defend against, and adding a
-meaningless check would be security theater: code that exists to satisfy a scanner,
-costs the reader something, and gives false assurance. That finding is documented
-as an accepted risk, with the reasoning, in `report/snyk_triage.md`. The test for
-whether to change the code is whether the result is better code, not whether the
-tool goes quiet.
-
-## Architecture
-
-The service has three layers. Each is described in more detail in the published
-Sphinx documentation.
-
-### Web layer
-
-`src/app.py` exposes a `create_app()` factory. Every outward dependency arrives
-as an argument, and every default is the real implementation, so running
-`python3 src/app.py` is unchanged from Module 3 while a test passes fakes and
-reaches no network and no database.
-
-```python
-create_app(scraper=None, loader=None, query=None, runner=None,
-           database_url=None, testing=False)
-```
-
-| Argument | Shape | Real default |
-| --- | --- | --- |
-| `scraper` | `() -> list[dict]` | the real Grad Café pull |
-| `loader` | `(records) -> int` | the real PostgreSQL loader |
-| `query` | `() -> {"summary":…, "results":…}` | an ORM read |
-| `runner` | `(job) -> int \| None` | a background thread, or inline when testing |
-
-Routes and their contracts:
-
-| Route | Method | Responses |
-| --- | --- | --- |
-| `/analysis` (and `/`) | `GET` | `200` the page; `503` the page with an error notice |
-| `/pull-data` | `POST` | `200 {"ok": true, "inserted": n}`; `202 {"ok": true, "started": true}`; `409 {"busy": true}`; `500 {"ok": false, "error": …}` |
-| `/update-analysis` | `POST` | `200 {"ok": true, "total": n}`; `409 {"busy": true}`; `503 {"ok": false, "error": …}` |
-
-The page carries stable selectors for tests: `data-testid="pull-data-btn"` and
-`data-testid="update-analysis-btn"`. Every rendered analysis value is labelled
-`Answer:`, and every percentage shown as readable text is formatted to two
-decimals.
-
-### ETL layer
-
-`scrape.py` renders Grad Café pages in Chrome and saves the HTML. `clean.py`
-parses the saved pages into records. `pull_data.py` orchestrates the two,
-standardizes the records with the LLM, and hands them to the loader.
-`pull_data.run_pull(scraper, loader)` is the single seam the Flask route and the
-tests share.
-
-### Database layer
-
-`load_data.py` owns the connection, the schema, and the insert. `models.py` maps
-the table with the SQLAlchemy `Applicant` model and builds session factories.
-`query_data.py` and `orm_queries.py` are the two read paths, answering the same
-questions in raw SQL and through the ORM respectively.
+## Development process
+
+### Module 5: hard input and output gates, governed by tests
+
+Module 4 was built spec-driven, with a plan that was rewritten as work went on.
+Module 5 added the part that makes a plan checkable: **every phase has a hard
+entry gate and a hard exit gate, and the exit gate is a set of tests that must
+exist, be collected, and pass before the phase counts as done.** The process is
+deterministic and repeatable because three artifacts are kept in step: `PLAN.md`
+says what each phase must achieve, `CHANGES.md` (the Change Register) records every
+design change with its reason and the tests that verify it, and
+`scripts/gate.sh` enforces both.
+
+**The gates.** `scripts/gate.sh entry N` refuses to start phase N unless the
+previous phase is committed and logged, the working tree is clean, and the
+environment is the pinned one. `scripts/gate.sh N` runs the exit gate: the full
+suite at 100% coverage, a marker on every test, Pylint no worse than the last gate
+(exactly 10.00 from Phase 6), no inline disables, no secrets, a Change Register
+whose every due row is `done` with a rationale, a README section, and tests that
+pytest actually collects, and then the checks specific to that phase. A pass is
+recorded against the exact git tree it passed on, and `gate.sh log N` will not write
+the Gate Log row unless the commit is that tree. Josh approved every commit and every
+push, and the gate output, not the author, says whether a phase is finished.
+
+**Tests before the work they judge.** The exit criteria and the names of the
+verifying tests were fixed in `PLAN.md` and `CHANGES.md` before a phase began, and
+the gate would not pass until tests with those names existed. Beyond the contract,
+four things were done in this order on purpose:
+
+- **Measure against a fixed point.** Before any code changed, Phase 0 captured what
+  Module 4 actually answered (all 30,000 rows through every analysis) and the SQL
+  its ORM compiled. The Phase 3 and Phase 6 refactors were then judged against that
+  snapshot, so "no answer changed" was a test and not an assurance.
+- **Make the gate prove it can fail.** The Phase 0 gate adds an unmarked test and
+  requires the run to stop. The Phase 3 gate reintroduces an f-string SQL statement
+  and requires the guard to reject it. A gate that has never been seen to fail
+  proves nothing.
+- **Break the code on purpose.** Where a test was written after the code it covers,
+  it was then run against a deliberately broken copy (a loosened regex, a removed
+  `finally`, a lowered threshold) and required to go red. A test that cannot fail is
+  not a gate. Each phase's README section names the break that was tried.
+- **Let the tests argue with the plan.** Red results were information. The first
+  least-privilege run failed four tests: one was a real bug (a missing table raised a
+  raw error instead of a message, A5.7), and the others were wrong expectations. The
+  limit test found that the plan contradicted itself on how many digits a limit may
+  have (A3.1). The first CI run failed three tests that passed only because of the
+  developer's `.env`, so the suite now refuses to read it (A9.6).
+
+**Why it is repeatable.** Each of the 21 Change Register rows states a problem, a
+decision, a trade-off and the tests that verify it, and the Gate Log records the
+commit, the test count, the coverage and the Pylint score at every exit (102 tests
+and 8.30 at the start; 605 and 10.00 now). Where execution diverged from the plan,
+an amendment was written down under the phase, 77 of them, so the plan plus its
+amendments describes what actually happened and not what was intended. Someone
+with the plan, the register and the gate script could replay the module in order,
+and would be stopped at the same places for the same reasons. The environment is
+pinned (`requirements.txt`, proven by `scripts/fresh_install_check.sh` with pip and
+uv), and the checks that guard the process, the secrets scan, the credential-leak
+check and the CI workflow, each have their own tests.
+
+**What the gates caught that review would likely have missed.** Two bugs in the gate
+script itself, found while logging Phase 1 (A1.6). Two credential-leak routes the
+plan would have created (A5.3). Snyk's inability to read a universal lock (A8.1). A
+dependency graph that differed between a Mac and a Linux runner (A9.6). In every
+case the discovery came from a check failing, not from reading the code.
+
+This module again used Claude Code for the whole of the work, in one continuous
+session with the repository, the test runner, a live PostgreSQL and GitHub Actions
+within reach. Every number in this README (tests, coverage, Pylint, Snyk) was
+produced by running the thing in that session.
+
+### Module 4
+
+Module 4 was built spec-driven rather than file-by-file: `PLAN.md`, in this
+same directory, is the living plan, not a one-time proposal. It lays out
+five phases (0 through 4, matching the sections above) _before_ any of
+them were built, then each phase's section was rewritten afterward to say
+what was actually built, including the three places execution diverged from
+the plan and why: `runner` as a seam separate from `scraper`/`loader`
+(Phase 0), two application fixtures instead of one because no single fixture
+could serve both halves of the suite (Phase 1), and the scraper
+orchestration having zero test coverage despite `test_buttons.py` doing
+exactly what the assignment asked of it (also Phase 1, caught mid-review).
+Every phase ended with a working, tested, committed state before the next
+began, and every commit in this module's history corresponds to one of
+those boundaries.
+
+This module also moved to consistent use of Claude Code, the terminal-based
+tool, for the whole of the work, rather than the mix of Claude's desktop and
+web apps used on earlier modules. The practical effect was a single
+continuous session with direct access to the repository, the test runner,
+and a live PostgreSQL connection throughout: every claim in this README
+about test counts, coverage percentages, and build output was run and
+checked in that session, not written from memory or assumption. `PLAN.md`
+is the record of that; this README is the summary of it.
+
+# Appendix: reference for the carried-over application
+
+The sections below describe the application as it came from Modules 2 to 4 and are kept as reference. They are
+accurate for Module 5 except where a section says it is Module 4 history.
 
 ## Changes to carried-over code
 
@@ -1781,142 +1818,6 @@ sample: 29,576 Fall 2026 entries against 192 for Fall 2025. The denominator is
 reported alongside the percentage, and the page's sample-size bar turns amber
 below 5.00% of the dataset so thin evidence reads as thin.
 
-## Testing
-
-The full suite runs from `module_5/`, because `pytest.ini` scopes coverage to
-`src/` relative to itself. Module 5 runs every collected test, with no marker
-expression (see [CHG-18](#chg-18)):
-
-```bash
-cd module_5
-pytest
-```
-
-The `db` and `integration` tests need `TEST_DATABASE_URL` to name a disposable
-database; the rest run with no database at all. *The marker table, counts, and
-coverage output below are Module 4's, and are regenerated in Phase 10.*
-
-Every test carries at least one marker; unmarked tests are not permitted.
-`pytest.ini`'s marker text is the assignment's own required wording, quoted
-exactly:
-
-| Marker | `pytest.ini` text |
-| --- | --- |
-| `web` | Flask route/page tests |
-| `buttons` | "Pull Data" and "Update Analysis" behavior |
-| `analysis` | formatting/rounding of analysis output |
-| `db` | database schema/inserts/selects |
-| `integration` | end-to-end flows |
-
-### Two application fixtures
-
-Tests reach the application only through `create_app()`, via two fixtures in
-`conftest.py` that fake different amounts of it:
-
-| Fixture | scraper | loader | query | Needs PostgreSQL |
-| --- | --- | --- | --- | --- |
-| `app` / `client` | fake | fake (records calls, writes nothing) | fake | No |
-| `db_client` | fake | real, against a truncated test database | real, same database | Yes |
-
-`app`/`client` serves `web`, `buttons`, and `analysis` tests. Faking `query`
-as well as the scraper and loader is what keeps `POST /update-analysis` from
-reaching PostgreSQL even when a pull is not in progress: without it, only
-`web` and `analysis` would be database-free, since `buttons` tests call that
-route too. Measured: all 24 `web`/`buttons`/`analysis` tests run in 0.05s with
-no `DATABASE_URL` set at all. `db_client` serves `db` and `integration`
-tests, against a disposable database `clean_db` truncates before and after
-each test; its scraper is still faked, so even these tests never reach Grad
-Café, but its loader and queries are real, which is what lets a test assert
-on actual rows.
-
-### Why the scraper is faked at two different depths
-
-`test_buttons.py` fakes the whole `scraper` callable at the `create_app()`
-boundary, which is what the assignment itself asks for ("Triggers the loader
-with the rows from the scraper (should be faked / mocked)"). That tests the
-route's contract: status codes, the JSON shape, busy gating. It does not
-exercise what Pull Data's scraper actually does when it runs, because the
-real `pull_data.scrape_new_records()` is never called.
-
-`test_pull_pipeline.py` closes that gap, also marked `buttons` per the table
-above (its definition is "Pull Data" behavior, not "button endpoint"
-behavior, so testing the pipeline one level below the route fits it). It
-calls the real `scrape_new_records()`, with a fake Selenium driver and a fake
-LLM subprocess standing in for the two outward dependencies, and proves the
-real logic: stopping at the database's newest entry across multiple pages of
-results, filtering out entries already present, and each of Pull Data's error
-paths (empty database, Grad Café unreachable, no new entries, the
-standardizer's environment missing). `clean.py`'s HTML parsing is exercised
-directly against small crafted pages, no fakes needed at all, since it is
-pure parsing with no outward dependency to replace.
-
-Writing these tests needed two more injection seams in `pull_data.py`, added
-to dependencies that were already there rather than new ones:
-
-- `fetch_html`, because `scrape._fetch_html()` drives a real Selenium
-  `WebDriverWait`. A test for "the page never arrived" routed through the
-  real function would block for its full 30-second timeout; `fetch_html` can
-  answer instantly instead, without touching what `browser_factory` means.
-- `scrape_new_records()`'s `sleep` argument, which it previously dropped
-  rather than passing to `_scrape_new_pages()`. A genuine two-page pagination
-  test needs two pages, which otherwise means one real `PAGE_DELAY` (2
-  seconds) in the middle of a test suite that is supposed to run in seconds,
-  not minutes.
-
-### The five files beyond the required five
-
-`pytest.ini` sets `--cov-fail-under=100` against all of `src/`, not only the
-code the five required files reach, and two facts about Module 3's own
-design are what make that gap real rather than theoretical:
-
-- **Two independent paths to the same nine questions.** Module 3 built
-  `query_data.py` (raw SQL) and `orm_queries.py` (the ORM) side by side, and
-  wired only the ORM path into the Flask page. `query_data.py` still ships in
-  `src/` for its own command line (`python3 src/query_data.py`); the app
-  never calls it, and no test aimed at app _behavior_ ever would either.
-- **Command-line entry points nothing in the web app reaches.** `main()` in
-  every module, `models.py`'s `_verify_mapping()`, and `scrape.py`'s
-  `scrape_data()` (the one-time historical batch scraper that produced the
-  original 30,000-row dataset, superseded for ongoing use by Pull Data's
-  incremental pull in `pull_data.py` but still present in `src/`) are each
-  reachable only by calling the function directly, not by posting to a route
-  or faking the scraper at the `create_app()` boundary.
-
-Five more files close what the five required ones leave dark because of
-those two facts, each for a specific, named reason rather than to pad the
-number:
-
-| File | Marker | Why it exists |
-| --- | --- | --- |
-| `test_pull_pipeline.py` | `buttons` | see above: the scraper's real orchestration and `clean.py`'s HTML parsing |
-| `test_scrape.py` | `buttons` | `scrape_data()`, the Module 2 batch scraper the Pull Data button never calls but `src/` still contains; gained the same `browser_factory`/`fetch_html`/`sleep` seams as `pull_data.py`, for the same reason |
-| `test_query_data.py` | `db` | the raw-SQL analyses, a second, independent path to the same questions that `app.py` never reads; run against a real database rather than a fake cursor, so the SQL text itself is proven, not just the Python that unpacks it |
-| `test_orm_queries.py` | `db` | the `--sql` debug output and `main()`, which `app.py`'s use of the same functions never reaches |
-| `test_models.py` | `db` | the module-level, cache-for-the-process `get_engine()`/`get_session()` the command-line scripts use, and `_verify_mapping()`, which doubles as a genuine proof the `Applicant` model still matches the live schema |
-
-Coverage, from `coverage_summary.txt`:
-
-```text
-Name                 Stmts   Miss  Cover
------------------------------------------
-src/app.py             114      0   100%
-src/clean.py            91      0   100%
-src/load_data.py       110      0   100%
-src/models.py           64      0   100%
-src/orm_queries.py     118      0   100%
-src/pull_data.py       116      0   100%
-src/query_data.py       82      0   100%
-src/scrape.py          107      0   100%
------------------------------------------
-TOTAL                  802      0   100%
-102 passed in 0.79s
-```
-
-Nine `# pragma: no cover` lines across `src/`, each with a one-line reason
-beside it: one per module's `if __name__ == "__main__":` block, and one
-branch in `scrape._fetch_html()` that a real Selenium timeout or standing in
-for `WebDriverWait`'s own internal sleep are the only ways to reach.
-
 ## Documentation
 
 Published at <https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/>.
@@ -1947,28 +1848,3 @@ module in `src/`, a testing guide, and operational notes.
 5. **A pull started from the web page does not survive a restart.** Busy state
    lives in the application process. Restarting the server mid-pull forgets the
    running pull, as it did in Module 3.
-
-## Development process
-
-Module 4 was built spec-driven rather than file-by-file: `PLAN.md`, in this
-same directory, is the living plan, not a one-time proposal. It lays out
-five phases (0 through 4, matching the sections above) _before_ any of
-them were built, then each phase's section was rewritten afterward to say
-what was actually built, including the three places execution diverged from
-the plan and why: `runner` as a seam separate from `scraper`/`loader`
-(Phase 0), two application fixtures instead of one because no single fixture
-could serve both halves of the suite (Phase 1), and the scraper
-orchestration having zero test coverage despite `test_buttons.py` doing
-exactly what the assignment asked of it (also Phase 1, caught mid-review).
-Every phase ended with a working, tested, committed state before the next
-began, and every commit in this module's history corresponds to one of
-those boundaries.
-
-This module also moved to consistent use of Claude Code, the terminal-based
-tool, for the whole of the work, rather than the mix of Claude's desktop and
-web apps used on earlier modules. The practical effect was a single
-continuous session with direct access to the repository, the test runner,
-and a live PostgreSQL connection throughout: every claim in this README
-about test counts, coverage percentages, and build output was run and
-checked in that session, not written from memory or assumption. `PLAN.md`
-is the record of that; this README is the summary of it.

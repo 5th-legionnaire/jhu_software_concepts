@@ -1,2 +1,0 @@
-usage: app.py [-h] [--file FILE] [--serve] [--out OUT] [--append] [--stdout]
-app.py: error: unrecognized arguments: donels ../chunk_*.json donels ../chunk_*.json.out donels ../chunk_*.json.log

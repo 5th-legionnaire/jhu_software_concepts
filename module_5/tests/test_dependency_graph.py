@@ -67,11 +67,32 @@ def test_the_graph_names_the_external_packages_the_report_discusses():
     assert {"flask", "psycopg", "sqlalchemy", "dotenv", "selenium"} <= nodes
 
 
+def project_view(svg_text):
+    """What the project itself imports: every edge into a src/ module, and the nodes they touch.
+
+    The edges *between third-party packages* (markupsafe into werkzeug, typing_extensions
+    into half the tree) depend on the platform and the resolved versions, and CI, on
+    Linux, draws different ones from a Mac. They say nothing about this code, so they
+    are not compared. Every import the project makes is.
+    """
+    nodes, edges = graph(svg_text)
+    own = {(imported, importer) for imported, importer in edges if importer in SRC_MODULES}
+    return (SRC_MODULES | {imported for imported, _importer in own}) & nodes, own
+
+
 def test_the_committed_graph_is_what_pydeps_produces_now(tmp_path):
-    """Regenerated, it has the same nodes and edges, so it cannot go stale unnoticed."""
+    """Regenerated, every import the project makes matches, so the graph cannot go stale unnoticed."""
     out = tmp_path / "regenerated.svg"
     subprocess.run([*PYDEPS, "-o", str(out)], cwd=MODULE_DIR, check=True, capture_output=True)
-    assert graph(out.read_text(encoding="utf-8")) == graph(SVG.read_text(encoding="utf-8"))
+    regenerated = project_view(out.read_text(encoding="utf-8"))
+    assert regenerated == project_view(SVG.read_text(encoding="utf-8"))
+    assert regenerated[1], "the comparison must not be vacuous"
+
+
+def test_the_graph_comparison_would_notice_a_new_project_import():
+    nodes, edges = project_view(SVG.read_text(encoding="utf-8"))
+    changed = (nodes, edges | {("statistics", "db_safety")})
+    assert changed != project_view(SVG.read_text(encoding="utf-8"))
 
 
 # --- the claims in the report, recomputed -----------------------------------

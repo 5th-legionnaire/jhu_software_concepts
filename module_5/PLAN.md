@@ -818,6 +818,14 @@ Interpretations: "4 separate actions" means four jobs in one `ci.yml`. The PDF's
 score is below 10" means fail on any test failure, with the 100% coverage gate on top.
 
 **Amendments** (mirrored in README "Changes to the plan")
+- **A9.6** The first CI run found three tests that passed locally only because of `.env` (two needed `DB_HOST`;
+  one compared platform-dependent third-party graph edges). The suite is now hermetic (`conftest.py` disables the
+  `.env` loader and takes only the two test URLs by name), and the graph test compares the project's own imports.
+- **A10.1** Cruft removed: `github.txt`, `check_llm.py`, `run_llm.sh`, `llm_hosting/all`, `sql/gre_check.sql`,
+  `sql/questions_scratch.sql`, `data/applicant_data.json` (nothing reads them; all in git history). `coverage_summary.txt`
+  regenerated.
+- **A9.7** The plan filtered CI to `module_5/**` paths; the assignment says "runs on every push/PR", so the filter was
+  removed and a test now fails if a branch or path filter is added.
 - **A9.1** Two-stage gate: `gate.sh 9` runs the offline checks before the push; after the first green run and the
   screenshot, `GATE_CI_LIVE=1 gate.sh 9` requires a successful run of the pushed commit and a screenshot that is
   not Module 4's, and that run is logged. A green run cannot exist before the push.
