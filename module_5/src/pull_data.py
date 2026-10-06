@@ -41,8 +41,10 @@ import traceback
 from datetime import date, timedelta
 
 import psycopg
+from selenium.common.exceptions import WebDriverException
 
 from sqlalchemy import func, select
+from sqlalchemy.exc import SQLAlchemyError
 
 import clean
 import scrape
@@ -77,6 +79,14 @@ class PullError(RuntimeError):
     is what lets the route answer with a non-200 and an explanation while
     guaranteeing the database was never written to.
     """
+
+
+# The failures a pull is expected to end in, each already explained to the
+# person who clicked: one of this module's own, a database error from either
+# driver, a file or network error, and a browser error. The route reports these
+# and keeps going. Anything else is a bug; it still clears the busy flag, but it
+# reaches the 500 handler instead of being swallowed (CHG-10).
+PULL_FAILURES = (PullError, psycopg.Error, SQLAlchemyError, OSError, WebDriverException)
 
 
 def run_pull(scraper, loader):
@@ -116,7 +126,7 @@ def _start_browser():
     A visible window is deliberate: Grad Cafe sits behind Cloudflare, and a
     verification check has to be cleared by hand the first time.
     """
-    return scrape._start_browser(headless=False)
+    return scrape.start_browser(headless=False)
 
 
 def _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=time.sleep,
@@ -134,7 +144,7 @@ def _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=time.sleep,
         sleep: the delay between page requests. Injected so a test passes a
             no-op rather than waiting, which is why this suite needs no sleep().
         fetch_html: callable(driver, url) returning a page's HTML or None.
-            Defaults to scrape._fetch_html, which drives a real Selenium
+            Defaults to scrape.fetch_html, which drives a real Selenium
             WebDriverWait. Injected separately from browser_factory because
             WebDriverWait polls on a real clock: a test exercising the
             "page never arrived" branch through the real function would
@@ -144,7 +154,7 @@ def _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=time.sleep,
     Returns:
         bool: False if a page could not be fetched, True otherwise.
     """
-    fetch_html = fetch_html or scrape._fetch_html
+    fetch_html = fetch_html or scrape.fetch_html
     shutil.rmtree(PAGES_DIR, ignore_errors=True)
     os.makedirs(PAGES_DIR)
     added_start = (newest_date - timedelta(days=1)).isoformat()
@@ -155,16 +165,16 @@ def _scrape_new_pages(newest_id, newest_date, browser_factory, sleep=time.sleep,
     try:
         while True:
             print(f"Checking Grad Café for new entries (page {page + 1}).")
-            html = fetch_html(driver, scrape._build_url(added_start, added_end, cursor))
+            html = fetch_html(driver, scrape.build_url(added_start, added_end, cursor))
             if html is None:
                 return False
             ids = [int(i) for i in RESULT_ID.findall(html)]
             if not ids:
                 return True
             page += 1
-            with open(scrape._page_path(PAGES_DIR, page), "w", encoding="utf-8") as out:
+            with open(scrape.page_path(PAGES_DIR, page), "w", encoding="utf-8") as out:
                 out.write(html)
-            cursor = scrape._next_cursor(html)
+            cursor = scrape.next_cursor(html)
             if min(ids) <= newest_id or cursor is None:
                 return True
             sleep(PAGE_DELAY)
@@ -328,7 +338,7 @@ def main():
 if __name__ == "__main__":  # pragma: no cover - command line entry point
     try:
         sys.exit(main())
-    except Exception:  # keep the last line readable even on an unexpected error
+    except PULL_FAILURES:  # keep the last line readable; anything else shows Python's own traceback
         traceback.print_exc()
         print("Stopped because of an unexpected error. No entries were added. "
               "Details are in pull_work/pull_data.log.")

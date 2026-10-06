@@ -4,10 +4,14 @@ Rubric: "Flask Page and Button Behavior Tests" (13 pts) and "Busy-State,
 Error-Path, and Deterministic Behavior Tests" (8 pts).
 """
 
+import psycopg
 import pytest
+from selenium.common.exceptions import WebDriverException
 from sqlalchemy.exc import SQLAlchemyError
 
+import app as app_module
 from app import Services, create_app
+from pull_data import PullError
 
 pytestmark = pytest.mark.buttons
 
@@ -91,3 +95,86 @@ def test_update_analysis_returns_503_when_the_database_is_unreachable(fake_scrap
 
     assert response.status_code == 503
     assert response.get_json()["ok"] is False
+
+
+# --- Module 5: a failed pull must never leave the app stuck busy (CHG-10) ----
+
+def _app_with(scraper, db_url, fake_loader):
+    return create_app(Services(scraper=scraper, loader=fake_loader),
+                      database_url=db_url, testing=True)
+
+
+def _raises(error):
+    def _scrape():
+        raise error
+    return _scrape
+
+
+@pytest.mark.parametrize("failure", [
+    PullError("scrape failed"),
+    psycopg.OperationalError("down"),
+    SQLAlchemyError("down"),
+    OSError("disk full"),
+    WebDriverException("browser crashed"),
+], ids=["PullError", "psycopg", "SQLAlchemy", "OSError", "WebDriver"])
+def test_every_anticipated_failure_is_a_json_500_and_clears_busy(db_url, fake_loader, failure):
+    app = _app_with(_raises(failure), db_url, fake_loader)
+    response = app.test_client().post("/pull-data")
+
+    assert response.status_code == 500
+    assert response.get_json()["ok"] is False
+    assert "Pull Data stopped." in response.get_json()["error"]
+    assert app.config["PULL_STATE"].busy is False
+    assert app.config["PULL_STATE"].last["state"] == "failed"
+
+
+def test_unlisted_exception_clears_busy(db_url, fake_loader):
+    """The trap: an error nobody anticipated must not leave busy True, or every later pull is a 409."""
+    app = _app_with(_raises(RuntimeError("a bug nobody listed")), db_url, fake_loader)
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    client = app.test_client()
+
+    assert client.post("/pull-data").status_code == 500
+    state = app.config["PULL_STATE"]
+    assert state.busy is False
+    assert state.last["state"] == "failed"
+    assert "unexpected error" in state.last["text"]
+
+    # And the very next pull is accepted, not refused with a 409.
+    assert client.post("/pull-data").status_code == 500
+
+
+def test_unhandled_error_returns_json_500(db_url, fake_loader):
+    """An error outside the anticipated set reaches the handler, which answers in the usual shape."""
+    app = _app_with(_raises(RuntimeError("a bug")), db_url, fake_loader)
+    app.config["PROPAGATE_EXCEPTIONS"] = False
+    response = app.test_client().post("/pull-data")
+
+    assert response.status_code == 500
+    assert response.is_json
+    body = response.get_json()
+    assert body == {"ok": False, "error": app_module.UNEXPECTED_ERROR}
+    assert "a bug" not in str(body), "the exception's text must not reach the client"
+
+
+def test_the_500_handler_covers_every_route(client):
+    """The handler is the app's, not the pull route's."""
+    registered = client.application.error_handler_spec[None][500]
+    assert registered, "no 500 handler is registered"
+
+
+def test_a_successful_pull_after_a_failure_is_accepted(db_url, fake_loader, fake_rows):
+    """Busy is not sticky: a failed pull and then a good one is the normal recovery."""
+    calls = []
+
+    def flaky():
+        calls.append(1)
+        if len(calls) == 1:
+            raise PullError("first try fails")
+        return fake_rows
+
+    app = _app_with(flaky, db_url, fake_loader)
+    client = app.test_client()
+    assert client.post("/pull-data").status_code == 500
+    assert client.post("/pull-data").status_code == 200
+    assert app.config["PULL_STATE"].last["state"] == "succeeded"

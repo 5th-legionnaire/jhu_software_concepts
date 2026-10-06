@@ -35,6 +35,7 @@ from psycopg import sql
 from app import Services, create_app
 from load_data import create_connection, create_table, execute_query, get_db_config
 from models import make_session_factory
+from pull_data import PullError
 
 
 # --- Test data -------------------------------------------------------------
@@ -100,9 +101,13 @@ def fake_scraper(fake_rows):
 
 @pytest.fixture
 def failing_scraper():
-    """Error-path double: raises, so the route must return non-200 and not write."""
+    """Error-path double: raises, so the route must return non-200 and not write.
+
+    Raises PullError, the failure a real scrape ends in. An exception outside
+    PULL_FAILURES is a different case, tested on its own in test_buttons.py.
+    """
     def _scrape(*args, **kwargs):
-        raise RuntimeError("scrape failed")
+        raise PullError("scrape failed")
     return _scrape
 
 

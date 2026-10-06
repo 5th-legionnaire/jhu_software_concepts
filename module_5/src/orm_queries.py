@@ -13,7 +13,7 @@ Part 6 questions, printed by main():
     User Question 2
 
 Every query is built from the Applicant model with select(), where(),
-func.count(), func.avg(), and_(), or_(), and case(), and executed through a
+sql_count(), func.avg(), and_(), or_(), and case(), and executed through a
 SQLAlchemy Session. No handwritten SQL is submitted anywhere in this module.
 
 The remaining questions (2, 3, 6, 7, and User Question 1) are also expressed
@@ -33,6 +33,7 @@ import sys
 
 from sqlalchemy import and_, case, func, or_, select
 from sqlalchemy.dialects import postgresql
+from sqlalchemy.sql.functions import count as sql_count
 
 from db_safety import MAX_LIMIT, clamp_limit
 from models import Applicant, get_session
@@ -100,13 +101,13 @@ def _pct(numerator, denominator):
 
 def q1_stmt():
     """Fall 2026 applicant count."""
-    return select(func.count()).select_from(Applicant).where(FALL_2026).limit(clamp_limit(1))
+    return select(sql_count()).select_from(Applicant).where(FALL_2026).limit(clamp_limit(1))
 
 
 def q2_stmt():
     """Percentage international among entries with a nationality classification."""
-    international = func.count().filter(INTERNATIONAL)
-    classified = func.count()
+    international = sql_count().filter(INTERNATIONAL)
+    classified = sql_count()
     return (
         select(international, classified, _pct(international, classified))
         .select_from(Applicant)
@@ -125,34 +126,34 @@ def q3_stmt():
         (Applicant.gre_aw, GRE_AW_RANGE),
     ]
     averages = [func.avg(col).filter(col.between(*rng)) for col, rng in metrics]
-    included = [func.count(col).filter(col.between(*rng)) for col, rng in metrics]
-    excluded = [func.count(col) - func.count(col).filter(col.between(*rng)) for col, rng in metrics]
+    included = [sql_count(col).filter(col.between(*rng)) for col, rng in metrics]
+    excluded = [sql_count(col) - sql_count(col).filter(col.between(*rng)) for col, rng in metrics]
     return select(*averages, *included, *excluded).select_from(Applicant).limit(clamp_limit(1))
 
 
 def q4_stmt():
     """Average GPA of American Fall 2026 applicants."""
-    return select(func.avg(Applicant.gpa), func.count(Applicant.gpa)).where(
+    return select(func.avg(Applicant.gpa), sql_count(Applicant.gpa)).where(
         and_(FALL_2026, AMERICAN, VALID_GPA)).limit(clamp_limit(1))
 
 
 def q5_stmt():
     """Fall 2025 acceptance percentage over all Fall 2025 entries."""
-    accepted = func.count().filter(ACCEPTED)
-    total = func.count()
+    accepted = sql_count().filter(ACCEPTED)
+    total = sql_count()
     return (select(accepted, total, _pct(accepted, total)).select_from(Applicant)
             .where(FALL_2025).limit(clamp_limit(1)))
 
 
 def q6_stmt():
     """Average GPA of accepted Fall 2026 applicants."""
-    return select(func.avg(Applicant.gpa), func.count(Applicant.gpa)).where(
+    return select(func.avg(Applicant.gpa), sql_count(Applicant.gpa)).where(
         and_(FALL_2026, ACCEPTED, VALID_GPA)).limit(clamp_limit(1))
 
 
 def q7_stmt():
     """JHU Masters in Computer Science entries, original fields."""
-    return select(func.count()).select_from(Applicant).where(and_(
+    return select(sql_count()).select_from(Applicant).where(and_(
         _matches(Applicant.program, JHU_PATTERN),
         _matches(Applicant.program, CS_PATTERN),
         MASTERS)).limit(clamp_limit(1))
@@ -160,7 +161,7 @@ def q7_stmt():
 
 def q8_stmt():
     """Fall 2026 CS PhD acceptances at the four universities, original fields."""
-    return select(func.count()).select_from(Applicant).where(and_(
+    return select(sql_count()).select_from(Applicant).where(and_(
         FALL_2026, ACCEPTED, PHD,
         _matches(Applicant.program, CS_PATTERN),
         _matches_any(Applicant.program, Q8_UNIVERSITY_PATTERN))).limit(clamp_limit(1))
@@ -168,17 +169,18 @@ def q8_stmt():
 
 def q9_stmt():
     """Question 8 with university and program identified from the LLM fields."""
-    return select(func.count()).select_from(Applicant).where(and_(
+    return select(sql_count()).select_from(Applicant).where(and_(
         FALL_2026, ACCEPTED, PHD,
         _matches(Applicant.llm_generated_program, CS_PATTERN),
-        _matches_any(Applicant.llm_generated_university, Q8_UNIVERSITY_PATTERN))).limit(clamp_limit(1))
+        _matches_any(Applicant.llm_generated_university, Q8_UNIVERSITY_PATTERN)
+    )).limit(clamp_limit(1))
 
 
 def uq1_stmt():
     """Fall 2026 acceptance rate by whether a usable GPA was reported."""
     group = case((VALID_GPA, "Reported GPA"), else_="No usable GPA").label("gpa_reported")
-    accepted = func.count().filter(ACCEPTED)
-    total = func.count()
+    accepted = sql_count().filter(ACCEPTED)
+    total = sql_count()
     return (
         select(group, total, accepted, _pct(accepted, total))
         .select_from(Applicant)
@@ -193,8 +195,8 @@ def uq2_stmt():
     """Fall 2026 acceptance rate by degree (PhD, Masters) and nationality."""
     degree = case((PHD, "PhD"), else_="Masters").label("degree_group")
     nationality = case((AMERICAN, "American"), else_="International").label("nationality")
-    accepted = func.count().filter(ACCEPTED)
-    total = func.count()
+    accepted = sql_count().filter(ACCEPTED)
+    total = sql_count()
     return (
         select(degree, nationality, total, accepted, _pct(accepted, total))
         .select_from(Applicant)
@@ -286,14 +288,15 @@ def fetch_one(session):
     section asks for: proof that a row can be read back with the right
     shape, independent of any analysis. Returns None if the table is empty.
     """
-    applicant = session.scalars(select(Applicant).order_by(Applicant.p_id).limit(clamp_limit(1))).first()
+    applicant = session.scalars(
+        select(Applicant).order_by(Applicant.p_id).limit(clamp_limit(1))).first()
     return applicant_dict(applicant) if applicant else None
 
 
 def dataset_summary(session):
     """Total entries and the range of date_added, for the page header."""
     total, first, last = session.execute(
-        select(func.count(), func.min(Applicant.date_added), func.max(Applicant.date_added))
+        select(sql_count(), func.min(Applicant.date_added), func.max(Applicant.date_added))
         .select_from(Applicant).limit(clamp_limit(1))).one()
     return {"total": total, "first_added": first, "last_added": last}
 

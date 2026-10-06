@@ -12,6 +12,12 @@ an unmarked test through. scripts/gate.sh proves the same thing end to end by
 adding an unmarked dummy test and confirming the run fails.
 """
 
+import configparser
+import re
+import subprocess
+import sys
+from pathlib import Path
+
 import pytest
 
 import conftest
@@ -67,3 +73,54 @@ def test_collection_hook_rejects_an_unmarked_test_by_name(request):
 def test_collection_hook_accepts_a_fully_marked_session(request):
     items = [_FakeItem("tests/test_a.py::test_marked", {"security"})]
     assert conftest.pytest_collection_modifyitems(request.config, items) is None
+
+
+# --- Module 5: the lint policy relaxes nothing (CHG-17, decision D6) ----------
+
+MODULE_DIR = Path(__file__).resolve().parent.parent
+
+
+def test_pylintrc_relaxes_nothing():
+    """The file says where the code lives and classifies SQLAlchemy bases. It silences nothing."""
+    parser = configparser.ConfigParser()
+    parser.read(MODULE_DIR / ".pylintrc", encoding="utf-8")
+    assert {section: set(parser[section]) for section in parser.sections()} == {
+        "MAIN": {"source-roots"},
+        "DESIGN": {"exclude-too-few-public-methods"},
+    }
+    assert parser["MAIN"]["source-roots"] == "src"
+    assert parser["DESIGN"]["exclude-too-few-public-methods"] == "sqlalchemy.orm.*"
+
+
+@pytest.mark.parametrize("forbidden", ["disable", "max-line-length", "max-args", "max-locals",
+                                       "max-attributes", "fail-under", "ignore", "ignore-patterns"])
+def test_pylintrc_sets_no_threshold_or_exclusion(forbidden):
+    text = (MODULE_DIR / ".pylintrc").read_text(encoding="utf-8")
+    assert not re.search(rf"^\s*{forbidden}\s*=", text, re.MULTILINE)
+
+
+def test_no_inline_disables():
+    """Findings are fixed in the code. Nothing in src/ or the scripts silences Pylint."""
+    marker = re.compile(r"#\s*pylint\s*:\s*(disable|skip-file)", re.IGNORECASE)
+    offenders = [f"{path.name}:{number}"
+                 for path in sorted((MODULE_DIR / "src").glob("*.py"))
+                 for number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1)
+                 if marker.search(line)]
+    assert offenders == []
+
+
+def test_the_inline_disable_check_would_catch_one():
+    marker = re.compile(r"#\s*pylint\s*:\s*(disable|skip-file)", re.IGNORECASE)
+    assert marker.search("x = 1  # " + "pylint: " + "disable=line-too-long")
+    assert marker.search("# " + "pylint:" + "skip-file")
+    assert not marker.search("# the pylint score is ten")
+
+
+def test_pylint_scores_ten_with_no_messages():
+    """The actual rubric number: no message of any kind, and exactly 10.00/10."""
+    result = subprocess.run(
+        [sys.executable, "-m", "pylint", "--rcfile=.pylintrc", "--fail-under=10", "src"],
+        cwd=MODULE_DIR, capture_output=True, text=True, check=False)
+    assert result.returncode == 0, result.stdout[-800:]
+    assert "rated at 10.00/10" in result.stdout
+    assert not re.search(r"^src/\S+:\d+:\d+: [CRWEF]\d{4}", result.stdout, re.MULTILINE)

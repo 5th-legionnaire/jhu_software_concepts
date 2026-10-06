@@ -363,7 +363,7 @@ def test_pull_data_start_browser_opens_a_visible_window(monkeypatch):
         def __init__(self, options):
             self.options = options
 
-    monkeypatch.setattr(scrape_module.webdriver, "Chrome", _FakeChrome)
+    monkeypatch.setattr(scrape_module, "Chrome", _FakeChrome)
 
     driver = pd._start_browser()
 

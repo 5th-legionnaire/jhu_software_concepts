@@ -8,7 +8,7 @@ Written for Module 3; see the README for what Module 4 changed.
 Contains:
     Base:                   declarative base for the ORM models
     Applicant:              model mapped to the existing applicants table
-    build_url():            the SQLAlchemy URL, from an explicit URL, DATABASE_URL, or the DB_* variables
+    build_url():            the SQLAlchemy URL, from an explicit URL, DATABASE_URL, or DB_*
     make_engine():          a new Engine for a given URL
     make_session_factory(): a sessionmaker bound to a new Engine for a given URL
     get_engine():           the application's default Engine, built once
@@ -26,9 +26,10 @@ import os
 from datetime import date
 from functools import lru_cache
 
-from sqlalchemy import Date, Engine, Float, Integer, Text, URL, create_engine, func, inspect, select
+from sqlalchemy import Date, Engine, Float, Integer, Text, URL, create_engine, inspect, select
 from sqlalchemy.engine import make_url
 from sqlalchemy.orm import DeclarativeBase, Mapped, Session, mapped_column, sessionmaker
+from sqlalchemy.sql.functions import count as sql_count
 
 from db_safety import clamp_limit
 from load_data import get_db_config
@@ -118,7 +119,7 @@ def make_engine(database_url=None) -> Engine:
     return create_engine(build_url(database_url), pool_pre_ping=True)
 
 
-def make_session_factory(database_url=None) -> sessionmaker[Session]:
+def make_session_factory(database_url=None) -> "sessionmaker[Session]":
     """Return a sessionmaker bound to a new Engine for the given URL.
 
     create_app() calls this, which is what lets a test point the whole
@@ -140,7 +141,7 @@ def get_engine() -> Engine:
 
 
 @lru_cache(maxsize=1)
-def _session_factory() -> sessionmaker[Session]:
+def _session_factory() -> "sessionmaker[Session]":
     """Return the sessionmaker bound to the application's default Engine."""
     return sessionmaker(bind=get_engine(), expire_on_commit=False)
 
@@ -162,8 +163,9 @@ def _verify_mapping():
     print("Model matches the table.")
 
     with get_session() as session:
-        total = session.scalar(select(func.count()).select_from(Applicant).limit(clamp_limit(1)))
-        newest = session.scalars(select(Applicant).order_by(Applicant.p_id.desc()).limit(clamp_limit(1))).first()
+        total = session.scalar(select(sql_count()).select_from(Applicant).limit(clamp_limit(1)))
+        newest = session.scalars(
+            select(Applicant).order_by(Applicant.p_id.desc()).limit(clamp_limit(1))).first()
     print(f"Rows via ORM: {total:,}")
     print(f"Newest entry: {newest!r}")
 

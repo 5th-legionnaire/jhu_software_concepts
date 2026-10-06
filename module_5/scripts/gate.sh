@@ -335,6 +335,27 @@ connection.close()
             || fail G9 "privileges.png is missing or is not a PNG"
         ok G9 "privileges.txt free of verifiers; privileges.png present and a valid PNG"
         ;;
+    6)
+        # The committed report is the real output, and it is exactly 10.00 with no message.
+        [ -s pylint_report.txt ] || fail G9 "pylint_report.txt is missing"
+        grep -q "rated at 10.00/10" pylint_report.txt || fail G9 "pylint_report.txt does not show 10.00/10"
+        grep -qE "^src/.*: [CRWEF][0-9]{4}" pylint_report.txt && fail G9 "pylint_report.txt lists messages"
+        "$PY" -m pylint --rcfile=.pylintrc --fail-under=10 src >"$GATE_DIR/phase-6-pylint-run.txt" 2>&1 \
+            || fail G9 "pylint --fail-under=10 failed; see .gate/phase-6-pylint-run.txt"
+        ok G9 "pylint_report.txt shows 10.00/10 with no messages, and a fresh run agrees"
+
+        # The compiled ORM SQL is Module 4's plus exactly the Phase 3 LIMIT, and the
+        # analysis answers are unchanged.
+        "$PY" -m pytest --no-cov -p no:cacheprovider -q \
+            tests/test_orm_queries.py::test_compiled_sql_unchanged \
+            tests/test_query_data.py::test_parity_with_module_4 >"$GATE_DIR/phase-6-parity.log" 2>&1 \
+            || fail G9 "the ORM SQL or the analysis answers changed; see .gate/phase-6-parity.log"
+        ok G9 "ORM SQL is Module 4's plus one LIMIT; run_all still matches the Module 4 snapshot"
+
+        # No escape hatches: no disable anywhere in src, a pylintrc of two entries.
+        [ "$(grep -cE '^[a-z-]+=' .pylintrc)" -eq 2 ] || fail G9 ".pylintrc holds more than the two permitted entries"
+        ok G9 ".pylintrc holds exactly the source root and the SQLAlchemy classification"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

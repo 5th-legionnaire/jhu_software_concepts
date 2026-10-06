@@ -1,6 +1,16 @@
 # Pylint configuration for module_5. Run from module_5/:
-#     pylint --rcfile=.pylintrc src
+#     pylint --rcfile=.pylintrc --fail-under=10 src
+#
 # This file says where the code lives. It relaxes no rule (decision D6 in
-# PLAN.md); Phase 6 adds only the SQLAlchemy declarative-base exclusion.
+# PLAN.md): no message is disabled, and no threshold is raised. The one entry
+# under DESIGN is a classification, not a relaxation. Pylint counts public
+# methods to flag a class that is only a bag of data, but a SQLAlchemy
+# declarative base and the mapped class that inherits it are a table
+# definition, with columns and no methods by design. Classes derived from
+# sqlalchemy.orm are exempt from that one count. Everything else, including
+# every other class, is checked as usual.
 [MAIN]
 source-roots=src
+
+[DESIGN]
+exclude-too-few-public-methods=sqlalchemy.orm.*

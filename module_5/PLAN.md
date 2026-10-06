@@ -682,6 +682,20 @@ for Josh's existing local DB.
 **Exit:** standard gate (G3 is now exactly 10.00 with zero message lines) plus: `pylint_report.txt`
 committed. `test_compiled_sql_unchanged` passes. Behavior parity holds (the run_all snapshot still passes).
 
+**Amendments** (mirrored in README "Changes to the plan"; A6.1 is above)
+- **A6.2** Selenium's `webdriver.Chrome` had the same "not callable" false positive as `func.count()`; it is
+  imported from `selenium.webdriver.chrome.webdriver`, and tests replace `scrape.Chrome`.
+- **A6.3** `failing_scraper` raises `PullError` (an anticipated failure), since a bare `RuntimeError` is no
+  longer one under CHG-10. Separate tests cover an unlisted exception.
+- **A6.4** `create_app` uses `services.x` directly instead of unpacking five locals (R0914).
+- **A6.5** The explicit `return None` in `run_in_background` is removed; the `__main__` handler in `pull_data`
+  catches `PULL_FAILURES`.
+- **A6.6** `test_pylint_scores_ten_with_no_messages` runs Pylint inside pytest, so every test run checks the
+  rubric number, not only the gate and CI.
+- **A6.7** Accounting for the 52 baseline messages: 23 false positives (CHG-16, A6.2), 15 formatting, 5 protected
+  accesses (CHG-14), 2 broad catches (CHG-10), 5 argument and local counts (CHG-15), 2 design (CHG-17), 1 useless
+  return (A6.5). Phase 3 had already removed the f-string line-length hits.
+
 **Amendments** (decided 2026-10-05 during the Phase 0 review, mirrored in README "Changes to the plan")
 - **A6.1** Phase 3 adds a LIMIT to every ORM statement, so the compiled SQL can no longer equal the
   Phase 0 snapshot. `test_compiled_sql_unchanged` instead asserts, for every `*_stmt()` builder, that the

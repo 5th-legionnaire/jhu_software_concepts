@@ -69,11 +69,13 @@ from db_safety import InputError
 from load_data import create_connection, get_db_config
 from models import make_session_factory
 from orm_queries import all_results, dataset_summary
-from pull_data import load_records, run_pull, scrape_new_records
+from pull_data import PULL_FAILURES, load_records, run_pull, scrape_new_records
 from query_data import fmt_avg, fmt_count, fmt_diff, fmt_pct
 
 # Answers resting on less than this share of the dataset are flagged as thin.
 THIN_SHARE = 0.05
+
+UNEXPECTED_ERROR = "The server hit an unexpected error. The details are in the server log."
 
 DB_UNREACHABLE = ("The database could not be reached. Check that PostgreSQL is running and "
                   "that the DB_* settings in .env, or DATABASE_URL, are correct, then try again.")
@@ -152,7 +154,6 @@ def run_in_background(job):
     answer 202 Accepted rather than 200 with a count.
     """
     threading.Thread(target=job, daemon=True).start()
-    return None
 
 
 # Default dependencies: the real implementations create_app() falls back to
@@ -231,7 +232,8 @@ def build_sections(r, total):
     required = [
         {"number": "1",
          "question": "How many entries are from applicants who applied for Fall 2026?",
-         "rows": [_row("Fall 2026 applicant count", fmt_count(r["q1"]["count"]), r["q1"]["count"])]},
+         "rows": [_row("Fall 2026 applicant count",
+                       fmt_count(r["q1"]["count"]), r["q1"]["count"])]},
         {"number": "2",
          "question": "Among entries that provide a nationality classification, what percentage "
                      "are international students?",
@@ -257,7 +259,8 @@ def build_sections(r, total):
          ]},
         {"number": "4",
          "question": "What is the average GPA of American applicants who applied for Fall 2026?",
-         "rows": [_row("Average GPA, American, Fall 2026", fmt_avg(r["q4"]["avg_gpa"]), r["q4"]["n"])]},
+         "rows": [_row("Average GPA, American, Fall 2026",
+                       fmt_avg(r["q4"]["avg_gpa"]), r["q4"]["n"])]},
         {"number": "5",
          "question": "What percentage of Fall 2025 entries are acceptances?",
          "rows": [_row("Fall 2025 acceptance percentage", fmt_pct(r["q5"]["pct"]), r["q5"]["total"],
@@ -266,15 +269,18 @@ def build_sections(r, total):
                        "that cycle had largely finished")]},
         {"number": "6",
          "question": "What is the average GPA of accepted applicants who applied for Fall 2026?",
-         "rows": [_row("Average GPA, accepted, Fall 2026", fmt_avg(r["q6"]["avg_gpa"]), r["q6"]["n"])]},
+         "rows": [_row("Average GPA, accepted, Fall 2026",
+                       fmt_avg(r["q6"]["avg_gpa"]), r["q6"]["n"])]},
         {"number": "7",
          "question": "How many entries are from applicants who applied to Johns Hopkins University "
                      "for a master's degree in Computer Science?",
-         "rows": [_row("JHU Masters in Computer Science", fmt_count(r["q7"]["count"]), r["q7"]["count"])]},
+         "rows": [_row("JHU Masters in Computer Science",
+                       fmt_count(r["q7"]["count"]), r["q7"]["count"])]},
         {"number": "8",
          "question": "How many Fall 2026 entries are acceptances for a PhD in Computer Science at "
                      "Georgetown, MIT, Stanford, or Carnegie Mellon, using the original fields?",
-         "rows": [_row("Original-field count", fmt_count(r["q9"]["original"]), r["q9"]["original"])]},
+         "rows": [_row("Original-field count",
+                       fmt_count(r["q9"]["original"]), r["q9"]["original"])]},
         {"number": "9",
          "question": "Repeating Question 8 with the LLM-generated university and program fields, "
                      "how does the count compare?",
@@ -365,8 +371,6 @@ def create_app(services=None, *, database_url=None, testing=False):
 
     session_factory = make_session_factory(database_url)
     services = with_defaults(services or Services(), session_factory, database_url, testing)
-    scraper, loader, query = services.scraper, services.loader, services.query
-    runner, search = services.runner, services.search
 
     # Exposed on config so a test can set state.busy directly and so the
     # routes share one object rather than a module-level global.
@@ -382,18 +386,33 @@ def create_app(services=None, *, database_url=None, testing=False):
         state.start()
 
         def job():
-            """One pull, with the page's status line kept correct either way."""
+            """One pull, with the page's status line kept correct whatever happens.
+
+            The finally block is what stops one failure becoming a permanent 409
+            (CHG-10): an error this code did not anticipate would otherwise
+            leave ``busy`` True, and every later pull would be refused. The
+            anticipated failures (PULL_FAILURES) get their own message and are
+            reported to the caller; anything else still clears busy and then
+            propagates to the 500 handler below.
+            """
+            finished = False
             try:
-                inserted = run_pull(scraper, loader)
-            except Exception as failure:  # noqa: BLE001 - reported, not swallowed
+                inserted = run_pull(services.scraper, services.loader)
+                state.finish(True, _pull_result_text(inserted))
+                finished = True
+                return inserted
+            except PULL_FAILURES as failure:
                 state.finish(False, f"Pull Data stopped. {failure}")
+                finished = True
                 raise
-            state.finish(True, _pull_result_text(inserted))
-            return inserted
+            finally:
+                if not finished:
+                    state.finish(False, "Pull Data stopped because of an unexpected error. "
+                                        "No entries were added.")
 
         try:
-            inserted = runner(job)
-        except Exception:  # noqa: BLE001 - every failure must answer non-200
+            inserted = services.runner(job)
+        except PULL_FAILURES:
             app.logger.exception("Pull Data failed")
             return jsonify(ok=False, error=state.last["text"]), 500
 
@@ -407,7 +426,7 @@ def create_app(services=None, *, database_url=None, testing=False):
         if state.busy:
             return jsonify(busy=True), 409
         try:
-            total = query()["summary"]["total"]
+            total = services.query()["summary"]["total"]
         except SQLAlchemyError:
             app.logger.exception("Update Analysis query failed")
             return jsonify(ok=False, error=DB_UNREACHABLE), 503
@@ -417,7 +436,7 @@ def create_app(services=None, *, database_url=None, testing=False):
     def index():
         """The analysis page, rebuilt from the database on every request."""
         try:
-            data = query()
+            data = services.query()
         except SQLAlchemyError:
             app.logger.exception("Analysis query failed")
             return render_template(
@@ -437,6 +456,11 @@ def create_app(services=None, *, database_url=None, testing=False):
             pull_status=state.last,
         )
 
+    @app.errorhandler(500)
+    def unexpected_error(_error):
+        """Answer an unhandled error in JSON, in the shape every other failure uses."""
+        return jsonify(ok=False, error=UNEXPECTED_ERROR), 500
+
     @app.get("/api/applicants")
     def applicants():
         """Search applicants. Invalid input is refused before any query exists."""
@@ -445,7 +469,7 @@ def create_app(services=None, *, database_url=None, testing=False):
         except InputError as error:
             return jsonify(ok=False, error=str(error)), 400
         try:
-            rows = search(filters)
+            rows = services.search(filters)
         except (DatabaseUnavailable, psycopg.OperationalError):
             app.logger.exception("Applicant search could not reach the database")
             return jsonify(ok=False, error=DB_UNREACHABLE), 503

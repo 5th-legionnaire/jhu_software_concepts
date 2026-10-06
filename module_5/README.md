@@ -21,10 +21,10 @@ This README is a **first pass, written while Module 5 is being built.** The
 build follows [PLAN.md](PLAN.md) in gated phases. Each phase must pass
 `scripts/gate.sh` (tests, 100% coverage, Pylint, secrets scan, Change Register)
 before it is committed, and the [Gate Log](PLAN.md) records each result.
-**Complete as of this commit: Phases 0 to 5** (scaffold and gate tooling;
+**Complete as of this commit: Phases 0 to 6** (scaffold and gate tooling;
 packaging and the pinned lock; configuration and secrets; SQL composition and
-`LIMIT`; the search endpoint; the least-privilege database). **Not started:** Pylint 10.00/10, the dependency graph, Snyk, the CI workflow,
-and the PDF report. Sections below that describe those are marked *pending*.
+`LIMIT`; the search endpoint; the least-privilege database; Pylint 10.00/10).
+**Not started:** the dependency graph, Snyk, the CI workflow, and the PDF report. Sections below that describe those are marked *pending*.
 The sections from "Architecture" onward still describe the Module 4 baseline
 and are brought up to date in Phase 10.
 
@@ -402,6 +402,131 @@ connection string. The setup is documented under
 asks the database who it is connected as, so a harness that silently ran as a
 superuser would fail.
 
+<a id="chg-10"></a>
+
+### CHG-10: a failed pull can no longer leave the app stuck busy
+
+**Problem.** The pull route caught `Exception`, and Pylint flags a catch that
+broad. Narrowing it to a list of expected errors, on its own, would have
+created a worse bug: any error not on the list would skip the code that clears
+the busy flag, leaving `busy` True for the life of the process. Every later
+pull would be refused with a 409, so one failure would become a permanent
+outage.
+
+**Decision.** `pull_data.PULL_FAILURES` names the failures a pull is expected to
+end in: its own `PullError`, a database error from either driver, an
+`OSError`, and a Selenium `WebDriverException`. The job clears busy in a
+`finally` block, whatever happens. An expected failure gets its own message and
+a JSON 500. An unexpected one still clears busy, then reaches a registered 500
+handler that answers in the same JSON shape and never repeats the exception's
+text to the client. Nothing is swallowed.
+
+**Trade-off.** An unexpected exception now shows up as a 500 and a server-log
+traceback instead of being folded into the pull's own error message. That is
+the right place for a bug to be loud, but it means the test double that raised a
+bare `RuntimeError` had to raise `PullError`, which is what a real scrape
+failure is (A6.3).
+
+**Verified by.** `tests/test_buttons.py`: `test_unlisted_exception_clears_busy`
+fails a pull with an exception nobody listed and then shows the next pull is
+accepted, not refused; `test_unhandled_error_returns_json_500` checks the
+response shape and that the exception text does not leak;
+`test_every_anticipated_failure_is_a_json_500_and_clears_busy` runs each member
+of the tuple. Removing the `finally` fails the first, and putting `except
+Exception` back fails the second and Pylint.
+
+<a id="chg-14"></a>
+
+### CHG-14: the scrape helpers `pull_data` uses are public
+
+**Problem.** `pull_data.py` called five helpers of `scrape.py` that began with an
+underscore, which says "do not call this from outside". The signal was false:
+they were already a cross-module API, and Pylint rightly flagged each call as
+protected access.
+
+**Decision.** `start_browser`, `fetch_html`, `build_url`, `page_path` and
+`next_cursor` lost their underscores. Helpers used only inside `scrape.py`
+keep theirs.
+
+**Trade-off.** They are now a public contract, so renaming them later is a
+breaking change. They already were one in practice.
+
+**Verified by.** `tests/test_scrape.py::test_public_api_surface` checks the five
+public names exist, the five private ones do not, and that `pull_data.py`
+contains no `scrape._` reach-in. The existing scrape and pull tests were renamed
+and still pass.
+
+<a id="chg-15"></a>
+
+### CHG-15: `scrape_data` takes a window and options, not nine arguments
+
+**Problem.** `scrape_data` had nine positional parameters and 17 local
+variables: easy to call in the wrong order, and Pylint counts both
+(`too-many-arguments`, `too-many-positional-arguments`, `too-many-locals`).
+
+**Decision.** `scrape_data(window, options=None)`. `ScrapeWindow` holds the two
+dates, and `ScrapeOptions` holds every other knob with its default in one
+place. Both are frozen dataclasses. The page loop moved into
+`_scrape_pages()`, so each function does one thing. Behavior, including resuming
+a previous run and closing the browser even when a page fails, is unchanged.
+
+**Trade-off.** Every caller changes from nine keywords to two objects, and the
+tests had to change with them.
+
+**Verified by.** `tests/test_scrape.py`: `test_options_defaults`,
+`test_window_and_options_are_immutable`, `test_scrape_data_takes_a_window_and_optional_options_only`,
+and the existing scrape tests, all rewritten to the new call. A new test shows
+the browser is closed when a page raises.
+
+<a id="chg-16"></a>
+
+### CHG-16: the SQLAlchemy false positives are cleared without a disable
+
+**Problem.** 22 of the original Pylint messages were not defects. Pylint's
+type inference cannot see through `sqlalchemy.func`, so every `func.count()`
+reported "not callable", and it read `sessionmaker[Session]` as subscripting
+something that is not subscriptable. Selenium's `webdriver.Chrome` had the same
+problem.
+
+**Decision.** `count` is imported from `sqlalchemy.sql.functions`, where
+Pylint can resolve it. The two generic annotations are quoted, and Chrome is
+imported from the module that defines it. No code behavior changes.
+
+**Trade-off.** The import is slightly less idiomatic than `func.count()`, and a
+future reader may wonder why. The reason is recorded here and in the module.
+
+**Verified by.** `tests/test_orm_queries.py::test_compiled_sql_unchanged`, for
+all eleven statements, compares the compiled SQL with the Module 4 snapshot taken
+before any change in Phase 0. It requires the Module 4 text word for word,
+followed by exactly one `LIMIT` clause, and the Module 4 parameters plus exactly
+one new one (amendment A6.1). It was shown to fail when a parameter changes or
+a clause is added.
+
+<a id="chg-17"></a>
+
+### CHG-17: Pylint is configured, not appeased
+
+**Problem.** A `.pylintrc` that raises thresholds or disables messages makes a
+score of 10.00 mean nothing, and an inline `# pylint: disable` hides the finding
+at the line that caused it.
+
+**Decision.** Findings are fixed in the code. `.pylintrc` contains the source
+root and one classification: a SQLAlchemy declarative base, and the mapped class
+that inherits it, are a table definition with columns and no methods by design,
+so they are exempt from the one rule that counts methods. `.editorconfig`
+enforces a final newline and the line limit in the editor, so the formatting
+messages do not come back. There are zero inline disables.
+
+**Trade-off.** Fixing the code costs more than a disable, and a few fixes
+(grouping arguments, extracting a function) are changes you would not otherwise
+make. That is the point: the score then says something.
+
+**Verified by.** `tests/test_lint_policy.py`: `test_pylintrc_relaxes_nothing`
+requires exactly those two entries, `test_pylintrc_sets_no_threshold_or_exclusion`
+rules out the usual escape hatches by name, `test_no_inline_disables` scans
+`src/`, and `test_pylint_scores_ten_with_no_messages` runs Pylint and requires
+`10.00/10` with no message line. `pylint_report.txt` is the committed output.
+
 <a id="chg-18"></a>
 
 ### CHG-18: The whole suite runs, and an unmarked test stops it
@@ -676,7 +801,7 @@ This list mirrors them.
   it. The leak-check instruction in the section above came from Josh at the
   Phase 5 go-ahead.
 
-### Phase 6 amendments, decided in advance
+### Phase 6 amendments
 
 - **A6.1 Compiled-SQL check allows exactly the Phase 3 LIMIT.** Phase 3
   adds a LIMIT to every ORM statement, so the compiled SQL can no longer equal
@@ -686,6 +811,29 @@ This list mirrors them.
   trailing `LIMIT` clause. The bound parameters must be the snapshot's plus
   that one limit value. The snapshot is never re-captured, so the test still
   shows that the LIMIT is the only change.
+- **A6.2 Selenium had the same false positive.** `webdriver.Chrome` reported
+  "not callable" for the same reason `func.count()` did. It is now imported from
+  `selenium.webdriver.chrome.webdriver`, and the tests replace `scrape.Chrome`.
+- **A6.3 The failing test double raises `PullError`.** `failing_scraper` raised a
+  bare `RuntimeError`, which CHG-10 correctly no longer treats as an anticipated
+  failure. It now raises what a real scrape failure raises, and separate tests
+  cover an exception nobody listed.
+- **A6.4 `create_app` uses `services.x` directly.** Unpacking `Services` into five
+  local names pushed it to 16 locals. Using the attributes is clearer and keeps it
+  under the limit with no change in behavior.
+- **A6.5 Two smaller fixes.** The explicit `return None` in `run_in_background`
+  is gone (the function returns `None` anyway, as its docstring says), and the
+  `__main__` handler in `pull_data.py` catches `PULL_FAILURES`, so anything
+  unexpected shows Python's own traceback.
+- **A6.6 The suite checks the score itself.** `test_pylint_scores_ten_with_no_messages`
+  runs Pylint inside pytest, about five seconds, so the rubric number is
+  verified by every test run and not only by the gate and CI.
+- **A6.7 Where the 52 baseline messages went.** 20 `not-callable` and 2
+  `unsubscriptable-object` false positives (CHG-16), plus Selenium's one (A6.2);
+  9 long lines and 6 missing final newlines (formatting, fixed in the code); 5
+  protected accesses (CHG-14); 2 broad catches (CHG-10); 4 argument-count and
+  1 local-count message (CHG-15); 2 `too-few-public-methods` (CHG-17); 1 useless
+  return (A6.5). Phase 3 had already removed the f-string line-length hits.
 
 ## Deliverables checklist
 
@@ -713,8 +861,8 @@ the rest name the phase that produces them.
 - [x] **Least-privilege database role** (Phase 5): `sql/roles.sql`,
       `sql/grants.sql`, `sql/migrate_ownership.sql`, [privileges.txt](privileges.txt),
       and the [privileges.png](privileges.png) screenshot of `\dp applicants`.
-- [ ] **10/10 Pylint evidence**, `pylint_report.txt` (Phase 6). The command is
-      documented under [Security tooling](#security-tooling).
+- [x] **10/10 Pylint evidence**, [pylint_report.txt](pylint_report.txt) (Phase 6).
+      The command is documented under [Security tooling](#security-tooling).
 - [ ] **`dependency.svg`** (Phase 7).
 - [ ] **`snyk-analysis.png`**, and for extra credit `snyk-code-analysis.png`
       (Phase 8).
@@ -745,7 +893,7 @@ scan run in CI.
 | `LIMIT` enforcement | every query bounded, one definition of the maximum, clamped 1 to 100 | `src/db_safety.py` | done |
 | Searchable endpoint | `GET /api/applicants` | `src/applicant_search.py` | done |
 | Least privilege | owner and runtime roles, `SELECT` and `INSERT` only | `sql/` | done |
-| Pylint 10.00/10 | fixes in code, no inline disables | `src/` | pending |
+| Pylint 10.00/10 | fixes in code, no inline disables, one classification in `.pylintrc` | `src/`, `pylint_report.txt` | done |
 | Dependency graph | pydeps and Graphviz | `dependency.svg` | pending |
 | Snyk | dependency and code scans | `snyk-analysis.png` | pending |
 | CI | lint, graph, Snyk, and tests as four jobs | `.github/workflows/ci.yml` | pending |
@@ -805,8 +953,7 @@ resolve through the editable install of `setup.py` (see
 [CHG-01](#chg-01)); `src/` is deliberately not a package, because converting it
 would break parity with Module 3, where these files sat at the top level.
 
-Not yet present, and produced in later phases: `dependency.svg`, `snyk-analysis.png`, `pylint_report.txt`,
-`.pylintrc` content beyond the source root, `privileges.png`,
+Not yet present, and produced in later phases: `dependency.svg`, `snyk-analysis.png`,
 `actions_success.png`, `module_5_report.pdf`, and
 `../.github/workflows/ci.yml`.
 
@@ -1095,7 +1242,7 @@ active.
 
 | Tool | Command | Reads as | Status |
 | --- | --- | --- | --- |
-| Pylint | `pylint --rcfile=.pylintrc --fail-under=10 src` | must print `rated at 10.00/10` with no message lines | pending (Phase 6); currently 8.31/10 |
+| Pylint | `pylint --rcfile=.pylintrc --fail-under=10 src` | must print `rated at 10.00/10` with no message lines | **10.00/10**, committed as `pylint_report.txt` (Phase 6) |
 | pydeps | `pydeps src/app.py --noshow -T svg -o dependency.svg` | needs Graphviz's `dot` on the path | pending (Phase 7) |
 | Snyk, dependencies | `snyk test --file=requirements.txt --package-manager=pip --command=python` | lists known vulnerabilities in the pinned packages | pending (Phase 8) |
 | Snyk Code | `snyk code test` | static analysis of `src/` (extra credit) | pending (Phase 8) |

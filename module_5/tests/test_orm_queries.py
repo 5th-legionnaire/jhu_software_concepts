@@ -8,6 +8,10 @@ covers what nothing else reaches: _sql()'s compiled-statement debug text,
 part6_lines()'s formatting, and main(), including its --sql flag.
 """
 
+import ast
+import re
+from pathlib import Path
+
 import pytest
 
 import models
@@ -71,3 +75,50 @@ def test_main_also_prints_sql_with_the_sql_flag(monkeypatch, session_factory, de
     output = capsys.readouterr().out
     assert "-- Q1" in output
     assert "parameters:" in output
+
+
+# --- Module 5: the compiled SQL is Module 4's, plus exactly the LIMIT (CHG-16, A6.1) ---
+
+SNAPSHOT = Path(__file__).resolve().parent / "snapshots" / "m4_orm_sql.txt"
+LIMIT_CLAUSE = re.compile(r" \n LIMIT %\(param_(\d+)\)s")   # exactly how SQLAlchemy appends one
+
+
+def _snapshot_blocks():
+    """{builder name: (SQL text, parameters)} from the Module 4 snapshot."""
+    blocks = {}
+    for block in SNAPSHOT.read_text(encoding="utf-8").strip().split("\n\n"):
+        header, body = block.split("\n", 1)
+        text, params = body.rsplit("\nparameters: ", 1)
+        blocks[header.removeprefix("-- ")] = (text, ast.literal_eval(params))
+    return blocks
+
+
+@pytest.mark.db
+@pytest.mark.parametrize("name", sorted(_snapshot_blocks()))
+def test_compiled_sql_unchanged(name):
+    """Phase 3 added a LIMIT to every statement. The Module 4 SQL, captured before any change,
+    must still be there word for word, followed by that one clause and nothing else.
+
+    The snapshot is never re-captured (amendment A6.1), so this keeps showing that the
+    LIMIT is the only difference, across the SQLAlchemy import change in Phase 6 as well.
+    """
+    old_text, old_params = _snapshot_blocks()[name]
+    current = oq._sql(getattr(oq, name)())
+    new_text, new_params = current.rsplit("\nparameters: ", 1)
+    new_params = ast.literal_eval(new_params)
+
+    assert new_text.startswith(old_text), "the Module 4 SQL text changed"
+    suffix = new_text[len(old_text):]
+    assert LIMIT_CLAUSE.fullmatch(suffix), f"more than a LIMIT was added: {suffix!r}"
+
+    limit_name = f"param_{LIMIT_CLAUSE.fullmatch(suffix).group(1)}"
+    assert limit_name not in old_params
+    assert {k: v for k, v in new_params.items() if k != limit_name} == old_params
+    assert 1 <= new_params[limit_name] <= 100
+
+
+def test_every_module_4_statement_is_still_covered():
+    """The snapshot has eleven statements, and the module still has exactly those builders."""
+    builders = {n for n in dir(oq) if n.endswith("_stmt")}
+    assert builders == set(_snapshot_blocks())
+    assert len(builders) == 11

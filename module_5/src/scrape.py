@@ -1,5 +1,5 @@
 """
-scrape.py — GradCafe admissions results scraper.
+scrape.py: GradCafe admissions results scraper.
 
 EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
@@ -7,11 +7,18 @@ Written for Module 2. Module 4 adds browser_factory, fetch_html, and sleep
 injection seams to scrape_data(), for the same reason pull_data.py added the
 same seams: so a test can stand in for Chrome and for waiting, without
 launching a real browser or calling sleep(). The scraping logic itself is
-unchanged.
+unchanged. Module 5 made the helpers pull_data.py already depended on public
+(CHG-14), and grouped scrape_data()'s nine arguments into two dataclasses with
+the page loop in its own function (CHG-15).
 
 Contains:
-    scrape_data() — pull raw result pages from GradCafe and save them
-    save_data()   — write records to a JSON file
+    ScrapeWindow, ScrapeOptions : what to scrape, and how
+    scrape_data()               : pull raw result pages from GradCafe and save them
+    build_url(), next_cursor(), page_path()
+                                : URL and file helpers shared with pull_data.py
+    start_browser(), fetch_html()
+                                : the Selenium pieces, injectable in a test
+    save_data()                 : write records to a JSON file
 
 Turning the saved pages into applicant records is clean.py's job.
 
@@ -43,12 +50,14 @@ import json
 import os
 import re
 import time
+from dataclasses import dataclass
+from typing import Callable, Optional
 from urllib import parse
 
 from bs4 import BeautifulSoup
-from selenium import webdriver
 from selenium.common.exceptions import TimeoutException
 from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.webdriver import WebDriver as Chrome
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import WebDriverWait
@@ -86,7 +95,7 @@ CHALLENGE_MARKERS = (
 PAGE_TIMEOUT = 30
 
 
-def _build_url(added_start, added_end, cursor=None):
+def build_url(added_start, added_end, cursor=None):
     """Build a survey URL for a date window, optionally at a cursor position."""
     params = {
         "added_start": added_start,
@@ -116,7 +125,7 @@ def _count_entries(html):
     return len(set(RESULT_LINK.findall(html)))
 
 
-def _next_cursor(html):
+def next_cursor(html):
     """Find the cursor token for the next page, or None if there isn't one.
 
     The pagination control labels the forward link "Next", and its href carries
@@ -133,7 +142,7 @@ def _next_cursor(html):
     return None
 
 
-def _start_browser(headless=False):
+def start_browser(headless=False):
     """Open Chrome using the persistent profile.
 
     Headless is off by default. The first run needs a visible window so the
@@ -144,10 +153,10 @@ def _start_browser(headless=False):
     options.add_argument("--profile-directory=Default")
     if headless:
         options.add_argument("--headless=new")
-    return webdriver.Chrome(options=options)
+    return Chrome(options=options)
 
 
-def _fetch_html(driver, url):
+def fetch_html(driver, url):
     """Load a page in the browser and return its HTML.
 
     Waits for an applicant result link to appear rather than sleeping for a
@@ -180,7 +189,7 @@ def _fetch_html(driver, url):
     return driver.page_source
 
 
-def _page_path(out_dir, number):
+def page_path(out_dir, number):
     """Path for a saved page, numbered in the order it was fetched."""
     return os.path.join(out_dir, f"page_{number:04d}.html")
 
@@ -205,71 +214,115 @@ def _resume(out_dir):
         with open(os.path.join(out_dir, name), encoding="utf-8") as saved:
             html = saved.read()
         entries += _count_entries(html)
-        cursor = _next_cursor(html)
+        cursor = next_cursor(html)
 
     print(f"Resuming: {len(pages)} pages and {entries} entries already saved.")
     return len(pages), entries, cursor
 
 
-def scrape_data(added_start, added_end, max_entries=30000, out_dir=RAW_DIR,
-                delay=2, headless=False, browser_factory=None, fetch_html=None,
-                sleep=time.sleep):
+@dataclass(frozen=True)
+class ScrapeWindow:
+    """The date window to scrape, as Grad Cafe's own "YYYY-MM-DD" strings.
+
+    Attributes:
+        added_start: earliest date to include.
+        added_end: latest date to include.
+    """
+
+    added_start: str
+    added_end: str
+
+
+@dataclass(frozen=True)
+class ScrapeOptions:
+    """How to scrape. Every field has a default, so a caller names only what it changes.
+
+    Attributes:
+        max_entries: stop once this many applicant entries have been saved.
+        out_dir: directory to write page HTML into.
+        delay: seconds to wait between page requests, to be polite.
+        headless: run Chrome without a window. Leave False on the first run.
+        browser_factory: callable returning a Selenium driver. Defaults to
+            start_browser(headless=headless). Injected so a test can stand in
+            for Chrome, the same seam pull_data.py uses for Pull Data.
+        fetch_html: callable(driver, url) returning a page's HTML or None.
+            Defaults to this module's fetch_html, which is the one piece a test
+            replaces rather than drives for real (see its own docstring).
+        sleep: the delay between page requests. Injected so a test passes a
+            no-op rather than waiting out a real ``delay`` between pages.
+    """
+
+    max_entries: int = 30000
+    out_dir: str = RAW_DIR
+    delay: float = 2
+    headless: bool = False
+    browser_factory: Optional[Callable] = None
+    fetch_html: Optional[Callable] = None
+    sleep: Callable = time.sleep
+
+
+def _scrape_pages(driver, window, options, progress):
+    """Fetch and save pages until a stopping condition, and return the entry count.
+
+    Args:
+        driver: an open Selenium driver.
+        window: the ScrapeWindow to fetch.
+        options: the ScrapeOptions in force.
+        progress: (page_count, entry_count, cursor) from _resume(), so a rerun
+            continues where the previous one stopped.
+
+    Returns:
+        int: the total number of applicant entries saved, earlier runs included.
+    """
+    page_count, entry_count, cursor = progress
+    fetch = options.fetch_html or fetch_html
+    while entry_count < options.max_entries:
+        html = fetch(driver, build_url(window.added_start, window.added_end, cursor))
+        if html is None:
+            print("Stopping: could not retrieve the page.")
+            break
+
+        found = _count_entries(html)
+        if found == 0:
+            print("Stopping: no entries found on this page.")
+            break
+
+        page_count += 1
+        entry_count += found
+        with open(page_path(options.out_dir, page_count), "w", encoding="utf-8") as out:
+            out.write(html)
+        print(f"Saved page {page_count} ({entry_count} entries so far).")
+
+        cursor = next_cursor(html)
+        if cursor is None:
+            print("Stopping: no more pages.")
+            break
+
+        options.sleep(options.delay)
+    return entry_count
+
+
+def scrape_data(window, options=None):
     """Save raw GradCafe result pages for one date window.
 
     Args:
-        added_start: earliest date to include, "YYYY-MM-DD".
-        added_end:   latest date to include, "YYYY-MM-DD".
-        max_entries: stop once this many applicant entries have been saved.
-        out_dir:     directory to write page HTML into.
-        delay:       seconds to wait between page requests, to be polite.
-        headless:    run Chrome without a window. Leave False on the first run.
-        browser_factory: callable returning a Selenium driver. Defaults to
-            _start_browser(headless=headless). Injected so a test can stand
-            in for Chrome, the same seam pull_data.py uses for Pull Data.
-        fetch_html: callable(driver, url) returning a page's HTML or None.
-            Defaults to _fetch_html. See _fetch_html's own docstring for why
-            this is the one piece a test replaces rather than drives for real.
-        sleep: the delay between page requests. Injected so a test passes a
-            no-op rather than waiting out a real `delay` between pages.
+        window: a ScrapeWindow naming the dates to include.
+        options: a ScrapeOptions, or None for the defaults.
 
-    Returns the number of applicant entries saved.
+    Returns:
+        int: the number of applicant entries saved.
     """
-    browser_factory = browser_factory or (lambda: _start_browser(headless=headless))
-    fetch_html = fetch_html or _fetch_html
+    options = options or ScrapeOptions()
+    browser_factory = options.browser_factory or (lambda: start_browser(headless=options.headless))
 
-    os.makedirs(out_dir, exist_ok=True)
-    page_count, entry_count, cursor = _resume(out_dir)
+    os.makedirs(options.out_dir, exist_ok=True)
+    progress = _resume(options.out_dir)
 
     driver = browser_factory()
     try:
-        while entry_count < max_entries:
-            url = _build_url(added_start, added_end, cursor)
-            html = fetch_html(driver, url)
-            if html is None:
-                print("Stopping: could not retrieve the page.")
-                break
-
-            found = _count_entries(html)
-            if found == 0:
-                print("Stopping: no entries found on this page.")
-                break
-
-            page_count += 1
-            entry_count += found
-            with open(_page_path(out_dir, page_count), "w", encoding="utf-8") as out:
-                out.write(html)
-            print(f"Saved page {page_count} ({entry_count} entries so far).")
-
-            cursor = _next_cursor(html)
-            if cursor is None:
-                print("Stopping: no more pages.")
-                break
-
-            sleep(delay)
+        return _scrape_pages(driver, window, options, progress)
     finally:
         driver.quit()
-
-    return entry_count
 
 
 def save_data(records, filename="applicant_data.json"):
@@ -283,5 +336,5 @@ def save_data(records, filename="applicant_data.json"):
 
 
 if __name__ == "__main__":  # pragma: no cover - command line entry point
-    total = scrape_data(added_start="2026-01-01", added_end="2026-09-14")
+    total = scrape_data(ScrapeWindow(added_start="2026-01-01", added_end="2026-09-14"))
     print(f"Done. {total} entries saved under {RAW_DIR}/.")

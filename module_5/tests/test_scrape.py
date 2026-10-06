@@ -3,14 +3,14 @@
 Rubric: pytest.ini's buttons marker text is "'Pull Data' and 'Update
 Analysis' behavior." scrape_data() is Module 2's one-time historical-pull
 entry point, not something the Pull Data button calls (pull_data.py calls
-_start_browser, _build_url, _next_cursor, and _page_path directly instead),
+start_browser, build_url, next_cursor, and page_path directly instead),
 but it is the same scraping behavior these functions exist for, so it is
 grouped with test_pull_pipeline.py under the same marker rather than left
 unmarked or forced into db/integration, neither of which it is.
 
-Nothing here launches a real browser or calls sleep(). _start_browser is
+Nothing here launches a real browser or calls sleep(). start_browser is
 exercised with webdriver.Chrome replaced by a fake that records what it was
-given, never a real Chrome process. _fetch_html's real-Selenium-timeout
+given, never a real Chrome process. fetch_html's real-Selenium-timeout
 branch is pragma'd in scrape.py itself, for the reason given there: reaching
 it for real needs either a real browser timeout or WebDriverWait's own
 internal sleep, both excluded by this suite's constraints.
@@ -26,7 +26,7 @@ pytestmark = pytest.mark.buttons
 # --- Pure helpers ------------------------------------------------------------
 
 def test_build_url_includes_the_date_window():
-    url = scrape._build_url("2026-01-01", "2026-09-14")
+    url = scrape.build_url("2026-01-01", "2026-09-14")
     assert url.startswith(scrape.BASE_URL + "?")
     assert "added_start=2026-01-01" in url
     assert "added_end=2026-09-14" in url
@@ -34,7 +34,7 @@ def test_build_url_includes_the_date_window():
 
 
 def test_build_url_includes_a_cursor_when_given_one():
-    url = scrape._build_url("2026-01-01", "2026-09-14", cursor="abc123")
+    url = scrape.build_url("2026-01-01", "2026-09-14", cursor="abc123")
     assert "cursor=abc123" in url
 
 
@@ -60,20 +60,20 @@ def test_count_entries_counts_distinct_result_links():
 
 def test_next_cursor_finds_the_next_link():
     html = '<a href="/survey?cursor=p2xyz">Next</a>'
-    assert scrape._next_cursor(html) == "p2xyz"
+    assert scrape.next_cursor(html) == "p2xyz"
 
 
 def test_next_cursor_none_when_there_is_no_next_link():
-    assert scrape._next_cursor("<a href=\"/survey?cursor=p2\">Previous</a>") is None
-    assert scrape._next_cursor("<p>no links here</p>") is None
+    assert scrape.next_cursor("<a href=\"/survey?cursor=p2\">Previous</a>") is None
+    assert scrape.next_cursor("<p>no links here</p>") is None
 
 
 def test_page_path_is_numbered_and_zero_padded():
-    assert scrape._page_path("/out", 1) == "/out/page_0001.html"
-    assert scrape._page_path("/out", 23) == "/out/page_0023.html"
+    assert scrape.page_path("/out", 1) == "/out/page_0001.html"
+    assert scrape.page_path("/out", 23) == "/out/page_0023.html"
 
 
-# --- _start_browser: configuration only, no real Chrome ---------------------
+# --- start_browser: configuration only, no real Chrome ---------------------
 
 class _FakeChrome:
     """Captures the Options it was built with, instead of launching Chrome."""
@@ -82,26 +82,26 @@ class _FakeChrome:
 
 
 def test_start_browser_uses_the_persistent_profile(monkeypatch):
-    monkeypatch.setattr(scrape.webdriver, "Chrome", _FakeChrome)
-    driver = scrape._start_browser(headless=False)
+    monkeypatch.setattr(scrape, "Chrome", _FakeChrome)
+    driver = scrape.start_browser(headless=False)
     assert any(scrape.PROFILE_DIR in arg for arg in driver.options.arguments)
     assert not any("--headless=new" in arg for arg in driver.options.arguments)
 
 
 def test_start_browser_headless_adds_the_headless_flag(monkeypatch):
-    monkeypatch.setattr(scrape.webdriver, "Chrome", _FakeChrome)
-    driver = scrape._start_browser(headless=True)
+    monkeypatch.setattr(scrape, "Chrome", _FakeChrome)
+    driver = scrape.start_browser(headless=True)
     assert "--headless=new" in driver.options.arguments
 
 
-# --- _fetch_html: the part that is not a real Selenium wait ------------------
+# --- fetch_html: the part that is not a real Selenium wait ------------------
 
 def test_fetch_html_skips_disallowed_urls_without_touching_the_driver():
     class _UnusedDriver:
         def get(self, url):
             raise AssertionError("a disallowed URL must never reach driver.get()")
 
-    result = scrape._fetch_html(_UnusedDriver(), "https://www.thegradcafe.com/signin")
+    result = scrape.fetch_html(_UnusedDriver(), "https://www.thegradcafe.com/signin")
     assert result is None
 
 
@@ -116,7 +116,7 @@ def test_fetch_html_returns_the_page_source_once_results_are_present():
         def find_element(self, by, value):
             return object()  # WebDriverWait only checks truthiness
 
-    result = scrape._fetch_html(_ReadyDriver(), "https://www.thegradcafe.com/survey")
+    result = scrape.fetch_html(_ReadyDriver(), "https://www.thegradcafe.com/survey")
     assert result == '<a href="/result/9000001">entry</a>'
 
 
@@ -155,29 +155,25 @@ class _FetchQueue:
         return self._pages.pop(0) if self._pages else None
 
 
+def _scrape(tmp_path, pages, **options):
+    """Run scrape_data over a fixed window with Chrome and waiting faked."""
+    settings = {"out_dir": str(tmp_path), "browser_factory": _FakeDriver,
+                "fetch_html": _FetchQueue(pages), "sleep": lambda _seconds: None, **options}
+    return scrape.scrape_data(scrape.ScrapeWindow("2026-01-01", "2026-09-14"),
+                              scrape.ScrapeOptions(**settings))
+
+
 def test_scrape_data_stops_when_a_page_cannot_be_fetched(tmp_path):
-    saved = scrape.scrape_data(
-        "2026-01-01", "2026-09-14", out_dir=str(tmp_path),
-        browser_factory=_FakeDriver, fetch_html=_FetchQueue([None]),
-        sleep=lambda _seconds: None)
-    assert saved == 0
+    assert _scrape(tmp_path, [None]) == 0
 
 
 def test_scrape_data_stops_when_a_page_has_no_entries(tmp_path):
-    saved = scrape.scrape_data(
-        "2026-01-01", "2026-09-14", out_dir=str(tmp_path),
-        browser_factory=_FakeDriver, fetch_html=_FetchQueue(["<html>empty</html>"]),
-        sleep=lambda _seconds: None)
-    assert saved == 0
+    assert _scrape(tmp_path, ["<html>empty</html>"]) == 0
 
 
 def test_scrape_data_stops_when_there_is_no_next_link(tmp_path):
     page = '<a href="/result/9000001">a</a><a href="/result/9000002">b</a>'
-    saved = scrape.scrape_data(
-        "2026-01-01", "2026-09-14", out_dir=str(tmp_path),
-        browser_factory=_FakeDriver, fetch_html=_FetchQueue([page]),
-        sleep=lambda _seconds: None)
-    assert saved == 2
+    assert _scrape(tmp_path, [page]) == 2
     assert (tmp_path / "page_0001.html").exists()
 
 
@@ -185,11 +181,7 @@ def test_scrape_data_stops_at_max_entries_across_pages(tmp_path):
     page_1 = ('<a href="/result/9000001">a</a><a href="/result/9000002">b</a>'
               '<a href="/survey?cursor=p2">Next</a>')
     page_2 = '<a href="/result/9000003">c</a><a href="/survey?cursor=p3">Next</a>'
-    saved = scrape.scrape_data(
-        "2026-01-01", "2026-09-14", max_entries=3, out_dir=str(tmp_path),
-        browser_factory=_FakeDriver, fetch_html=_FetchQueue([page_1, page_2]),
-        sleep=lambda _seconds: None)
-    assert saved == 3
+    assert _scrape(tmp_path, [page_1, page_2], max_entries=3) == 3
     assert (tmp_path / "page_0001.html").exists()
     assert (tmp_path / "page_0002.html").exists()
 
@@ -199,12 +191,80 @@ def test_scrape_data_resumes_a_previous_run(tmp_path):
     (tmp_path / "page_0001.html").write_text(
         '<a href="/result/9000001">a</a><a href="/result/9000002">b</a>', encoding="utf-8")
 
-    saved = scrape.scrape_data(
-        "2026-01-01", "2026-09-14", max_entries=2, out_dir=str(tmp_path),
-        browser_factory=_FakeDriver, fetch_html=_FetchQueue([]),
-        sleep=lambda _seconds: None)
+    # The loop never runs: entry_count already meets max_entries.
+    assert _scrape(tmp_path, [], max_entries=2) == 2
 
-    assert saved == 2  # the while loop never runs: entry_count already meets max_entries
+
+def test_scrape_data_waits_the_configured_delay_between_pages(tmp_path):
+    waits = []
+    page_1 = '<a href="/result/9000001">a</a><a href="/survey?cursor=p2">Next</a>'
+    page_2 = '<a href="/result/9000002">b</a>'
+    _scrape(tmp_path, [page_1, page_2], delay=7, sleep=waits.append)
+    assert waits == [7]
+
+
+def test_scrape_data_closes_the_browser_even_when_a_page_raises(tmp_path):
+    closed = []
+
+    class _Driver:
+        def quit(self):
+            closed.append(True)
+
+    def _explode(_driver, _url):
+        raise OSError("network down")
+
+    with pytest.raises(OSError):
+        _scrape(tmp_path, [], browser_factory=_Driver, fetch_html=_explode)
+    assert closed == [True]
+
+
+def test_scrape_data_default_browser_honors_headless(tmp_path, monkeypatch):
+    """With no browser_factory, scrape_data opens the browser the options describe."""
+    opened = []
+    monkeypatch.setattr(scrape, "start_browser",
+                        lambda headless=False: opened.append(headless) or _FakeDriver())
+    scrape.scrape_data(
+        scrape.ScrapeWindow("2026-01-01", "2026-09-14"),
+        scrape.ScrapeOptions(out_dir=str(tmp_path), headless=True,
+                             fetch_html=_FetchQueue([None]), sleep=lambda _s: None))
+    assert opened == [True]
+
+
+# --- Module 5: the grouped arguments and the public helpers (CHG-14, CHG-15) -
+
+def test_options_defaults():
+    """Every knob has one named default, so a caller states only what it changes."""
+    options = scrape.ScrapeOptions()
+    assert (options.max_entries, options.out_dir, options.delay, options.headless) == \
+        (30000, scrape.RAW_DIR, 2, False)
+    assert (options.browser_factory, options.fetch_html) == (None, None)
+    assert options.sleep is scrape.time.sleep
+
+
+def test_window_and_options_are_immutable():
+    window = scrape.ScrapeWindow("2026-01-01", "2026-09-14")
+    with pytest.raises(AttributeError):
+        window.added_end = "2027-01-01"
+    with pytest.raises(AttributeError):
+        scrape.ScrapeOptions().delay = 0
+    assert (window.added_start, window.added_end) == ("2026-01-01", "2026-09-14")
+
+
+def test_scrape_data_takes_a_window_and_optional_options_only():
+    import inspect
+    assert list(inspect.signature(scrape.scrape_data).parameters) == ["window", "options"]
+
+
+def test_public_api_surface():
+    """The helpers pull_data.py uses are public, and no underscore name is left to reach into."""
+    import inspect
+    for name in ("start_browser", "fetch_html", "build_url", "page_path", "next_cursor",
+                 "scrape_data", "save_data", "ScrapeWindow", "ScrapeOptions"):
+        assert hasattr(scrape, name), name
+    for old in ("_start_browser", "_fetch_html", "_build_url", "_page_path", "_next_cursor"):
+        assert not hasattr(scrape, old), f"{old} should have been renamed"
+    source = inspect.getsource(__import__("pull_data"))
+    assert "scrape._" not in source, "pull_data reaches into a private name of scrape"
 
 
 # --- save_data: pure file writing -------------------------------------------
