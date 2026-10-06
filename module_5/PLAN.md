@@ -583,7 +583,7 @@ Two cases are spot-checked with `curl` against the running app.
   error is a bare 500.
 - **A4.8** The Phase 3 spy and LIMIT guard tests now cover `search_applicants` and the search statement.
 
-### Phase 5: Least-privilege database (CHG-11, CHG-12, CHG-13)
+### Phase 5: Least-privilege database (CHG-11, CHG-12, CHG-13) (COMPLETE)
 
 **Entry:** standard. Local superuser access confirmed (track B). `psql --version` works.
 
@@ -893,3 +893,4 @@ Appended by `gate.sh` at each phase exit.
 | 2 | 2026-10-05 21:53 | a00ebfa | 189 | 100.00% | 8.31 | DB_* config with roles, sanitized connection errors, .env.example, TEST_DATABASE_URL pulled forward, README first pass; amendments A2.1 to A2.8. |
 | 3 | 2026-10-05 22:01 | 48b2a49 | 333 | 100.00% | 8.52 | Composed SQL, LIMIT everywhere, db_safety, parity with Module 4 over 30,000 rows; amendments A3.1 to A3.5. |
 | 4 | 2026-10-05 22:08 | 439845e | 443 | 100.00% | 8.68 | GET /api/applicants, Services seam, 51-case malicious-input matrix, live curl spot-checks; amendments A4.1 to A4.8. |
+| 5 | 2026-10-05 22:28 | c65c87c | 509 | 100.00% | 8.68 | Least-privilege roles, SCRAM verifiers, permanent credential leak check, privileges.txt and privileges.png; real DB migrated; amendments A5.1 to A5.11. |
