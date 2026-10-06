@@ -156,13 +156,23 @@ def fake_query():
 
 # --- Database --------------------------------------------------------------
 
+# Handed to the app fixtures when TEST_DATABASE_URL is unset. It names no user
+# or password, and port 1 is privileged and essentially never listening, so an
+# offline test that reaches for the database fails fast instead of finding a
+# developer's real one.
+UNCONFIGURED_URL = "postgresql+psycopg://localhost:1/test_database_not_configured"
+
+
 @pytest.fixture
 def db_url():
-    """Test database URL; CI sets DATABASE_URL, locally fall back to a test DB."""
-    return os.environ.get(
-        "DATABASE_URL",
-        "postgresql+psycopg://postgres:postgres@localhost:5432/gradcafe_test",
-    )
+    """The disposable test database's URL, from TEST_DATABASE_URL.
+
+    There is no default: a credential written into the suite is a credential
+    in the repository. Offline tests do not need a database, so they get
+    UNCONFIGURED_URL when the variable is unset. clean_db, which does, fails
+    with a message naming the variable.
+    """
+    return os.environ.get("TEST_DATABASE_URL") or UNCONFIGURED_URL
 
 
 @pytest.fixture
@@ -174,14 +184,21 @@ def clean_db(db_url):
     ON CONFLICT (p_id) target included. Yields a session factory bound to
     the test database, for tests that read through the ORM directly.
     """
+    if db_url == UNCONFIGURED_URL:
+        pytest.fail(
+            "TEST_DATABASE_URL is not set. Point it at a disposable PostgreSQL "
+            "database (see .env.example and the README's Installation and setup "
+            "section); db and integration tests truncate its applicants table.",
+            pytrace=False,
+        )
     config = get_db_config(db_url)
 
     def _reset():
         connection = create_connection(config)
         if connection is None:
             pytest.fail(
-                f"PostgreSQL is not reachable at {db_url}. Start PostgreSQL and "
-                "create the test database (see the README's Installation and "
+                "PostgreSQL is not reachable with TEST_DATABASE_URL. Start PostgreSQL "
+                "and create the test database (see the README's Installation and "
                 "setup section) before running db or integration tests.",
                 pytrace=False,
             )

@@ -43,7 +43,7 @@ the loader's single transaction makes a concurrent read safe. That is still
 true, but a refresh taken mid-pull reports a total that is about to change, so
 the pull now has the page to itself and the answer is never half-stale.
 
-Usage (from module_4/):
+Usage (from module_5/):
     python3 src/app.py      # then open http://127.0.0.1:8080/analysis
 """
 
@@ -64,7 +64,7 @@ from query_data import fmt_avg, fmt_count, fmt_diff, fmt_pct
 THIN_SHARE = 0.05
 
 DB_UNREACHABLE = ("The database could not be reached. Check that PostgreSQL is running and "
-                  "that DATABASE_URL is correct, then try again.")
+                  "that the DB_* settings in .env, or DATABASE_URL, are correct, then try again.")
 
 
 class PullState:
@@ -294,7 +294,7 @@ def create_app(scraper=None, loader=None, query=None, runner=None,
             when the job was started in the background. Defaults to
             run_inline when testing, run_in_background otherwise.
         database_url: the database the default query and loader should use.
-            Falls back to DATABASE_URL, then to the PG* variables.
+            Falls back to DATABASE_URL, then to the DB_* variables.
         testing: sets Flask's TESTING config and selects the inline runner.
 
     Returns:

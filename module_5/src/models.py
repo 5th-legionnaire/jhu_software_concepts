@@ -8,7 +8,7 @@ Written for Module 3; see the README for what Module 4 changed.
 Contains:
     Base:                   declarative base for the ORM models
     Applicant:              model mapped to the existing applicants table
-    build_url():            the SQLAlchemy URL, from DATABASE_URL or the PG* fallbacks
+    build_url():            the SQLAlchemy URL, from an explicit URL, DATABASE_URL, or the DB_* variables
     make_engine():          a new Engine for a given URL
     make_session_factory(): a sessionmaker bound to a new Engine for a given URL
     get_engine():           the application's default Engine, built once
@@ -18,7 +18,7 @@ The table is created and loaded by load_data.py. This module maps it and does
 not create, alter, or copy it: there is one applicants table, read by both the
 raw SQL and ORM code.
 
-Usage (from module_4/):
+Usage (from module_5/):
     python3 src/models.py    # verify the model against the live table
 """
 
@@ -79,9 +79,9 @@ class Applicant(Base):
 def build_url(database_url=None):
     """Return the SQLAlchemy URL for the database.
 
-    An explicit argument wins, then DATABASE_URL, then the PG* settings
-    load_data.py reads, so the ORM and the raw SQL code always reach the same
-    database and table. URL.create escapes the password safely, which
+    An explicit argument wins, then DATABASE_URL, then the DB_* settings
+    load_data.py reads for the runtime ("app") role, so the ORM and the raw SQL
+    code always reach the same database and table. URL.create escapes the password safely, which
     string-formatting a URL would not.
 
     Args:

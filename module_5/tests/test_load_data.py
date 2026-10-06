@@ -3,7 +3,7 @@
 Rubric: "Test Organization, Markers, and Coverage" (100% coverage of src/).
 Most of this module runs already, indirectly, through insert_records() calls
 in other test files, but several branches only a dedicated test reaches: the
-PG* fallback when DATABASE_URL is unset, a failed connection, a failed
+DB_* settings when DATABASE_URL is unset, a failed connection, a failed
 statement, the "blank value becomes NULL" conversion for each field type, and
 load_data()/main() themselves, which nothing else in the suite calls.
 """
@@ -19,15 +19,16 @@ import load_data as ld
 pytestmark = pytest.mark.db
 
 
-# --- get_db_config: the PG* fallback ----------------------------------------
+# --- get_db_config: the DB_* variables --------------------------------------
+# Precedence, roles, and error messages are covered in test_config.py.
 
-def test_get_db_config_falls_back_to_pg_star_variables(monkeypatch):
+def test_get_db_config_reads_the_db_variables(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.setenv("PGHOST", "fallback-host")
-    monkeypatch.setenv("PGPORT", "5433")
-    monkeypatch.setenv("PGDATABASE", "fallback-db")
-    monkeypatch.setenv("PGUSER", "fallback-user")
-    monkeypatch.setenv("PGPASSWORD", "fallback-pass")
+    monkeypatch.setenv("DB_HOST", "fallback-host")
+    monkeypatch.setenv("DB_PORT", "5433")
+    monkeypatch.setenv("DB_NAME", "fallback-db")
+    monkeypatch.setenv("DB_USER", "fallback-user")
+    monkeypatch.setenv("DB_PASSWORD", "fallback-pass")
 
     assert ld.get_db_config() == {
         "host": "fallback-host", "port": "5433", "dbname": "fallback-db",

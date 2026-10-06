@@ -26,15 +26,15 @@ def test_applicant_repr_includes_identifying_fields():
     assert "Accepted" in text
 
 
-# --- build_url: the PG* fallback --------------------------------------------
+# --- build_url: the DB_* variables ------------------------------------------
 
-def test_build_url_falls_back_to_pg_star_variables(monkeypatch):
+def test_build_url_reads_the_db_variables(monkeypatch):
     monkeypatch.delenv("DATABASE_URL", raising=False)
-    monkeypatch.setenv("PGHOST", "fallback-host")
-    monkeypatch.setenv("PGPORT", "5433")
-    monkeypatch.setenv("PGDATABASE", "fallback-db")
-    monkeypatch.setenv("PGUSER", "fallback-user")
-    monkeypatch.setenv("PGPASSWORD", "fallback-pass")
+    monkeypatch.setenv("DB_HOST", "fallback-host")
+    monkeypatch.setenv("DB_PORT", "5433")
+    monkeypatch.setenv("DB_NAME", "fallback-db")
+    monkeypatch.setenv("DB_USER", "fallback-user")
+    monkeypatch.setenv("DB_PASSWORD", "fallback-pass")
 
     url = models.build_url()
 

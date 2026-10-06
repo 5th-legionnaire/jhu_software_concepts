@@ -84,7 +84,7 @@ def test_secrets_scan_flags_credential_shapes(secrets, tmp_path, line, expected)
 @pytest.mark.parametrize("line", [
     'URL = "postgresql://app:change-me@localhost/gradcafe"',
     'URL = "postgresql://user:${DB_PASSWORD}@host/db"',
-    'PG = {"password": "PGPASSWORD"}',
+    'CFG = {"password": "DB_PASSWORD"}',
     'password = "pass"',
     "x = os.environ['DB_PASSWORD']",
 ])

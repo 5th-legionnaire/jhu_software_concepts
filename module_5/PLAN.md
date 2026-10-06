@@ -409,6 +409,25 @@ equals the non-comment line count. CHG-01 and CHG-02 are `done` with README subs
 **Exit:** standard gate plus: `grep -rn "PG\(HOST\|USER\|PASSWORD\|DATABASE\|PORT\)" src tests`
 is empty. App starts from `.env`. `git check-ignore -q .env` succeeds.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A2.1** `.env.example` is a task of this phase, so the entry check's "built from `.env.example`" is
+  circular. The local `.env` was migrated by hand (`PG*` keys renamed to `DB_*`, values unchanged).
+- **A2.2** `.env.example` uses `DB_NAME=gradcafedb`, Josh's existing database, not `gradcafe`.
+- **A2.3** `TEST_DATABASE_URL` is deliberately pulled forward from Phase 5 (CHG-13), because this phase's
+  secrets check retires the conftest fallback literal. No default. Offline tests get an unreachable,
+  credential-free URL; `clean_db` fails with a message naming the variable. Phase 5 adds
+  `TEST_ADMIN_DATABASE_URL` and the app/owner split.
+- **A2.4** `tests.yml` keeps its `PG*` variables: it runs Module 4 and must stay untouched. Only
+  Module 5's `ci.yml` (Phase 9) is `PG*`-free.
+- **A2.5** Tests that prove the `PG*` names are gone build them from parts, so the literal exit grep stays
+  empty and meaningful.
+- **A2.6** Five stale `Usage (from module_4/)` docstring paths in `src/` now say `module_5/`.
+- **A2.7** `docs/*.rst` and the README "Connection settings" section describe `DB_*`. README Module 4
+  history sections stay until Phase 10.
+- **A2.8** First-pass README update, requested at the Phase 2 review: Module 5 header, status, deliverables
+  checklist, overview, structure, Fresh Install (pip and uv), environment-variable table, security-tooling
+  commands, with pending items marked. Architecture onward is still the Module 4 baseline until Phase 10.
+
 ### Phase 3: SQL composition and LIMIT everywhere (CHG-05, CHG-06, CHG-07)
 
 **Entry:** standard. Parity snapshots from Phase 0 are present.

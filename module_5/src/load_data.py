@@ -8,18 +8,21 @@ Joshua Latz (jlatz1)
 Written for Module 3; see the README for what Module 4 changed.
 
 Contains:
-    get_db_config():     connection settings from DATABASE_URL, or the PG* fallbacks
-    create_connection(): open a connection using those settings
+    get_db_config():     connection settings for a role, from an explicit URL,
+                         DATABASE_URL, or the DB_* variables
+    create_connection(): open a connection using those settings, logging a
+                         sanitized message on failure
     execute_query():     run a single statement in its own transaction
     create_table():      create the applicants table and attach its column descriptions
     insert_records():    load records already in memory, in one transaction
     load_data():         read records back from a JSON file and load them into a PostgreSQL database
 
-Usage (from module_4/):
+Usage (from module_5/):
     python3 src/load_data.py [path/to/llm_extend_applicant_data.json]
 """
 
 import json
+import logging
 import os
 import re
 import sys
@@ -32,16 +35,25 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# The bulk JSON lives in module_4/data/, one level above this file's src/.
+logger = logging.getLogger(__name__)
+
+# The bulk JSON lives in module_5/data/, one level above this file's src/.
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 DEFAULT_DATA_FILE = os.path.join(PROJECT_DIR, "data", "llm_extend_applicant_data.json")
 
-PG_ENV_KEYS = {
-    "host": "PGHOST",
-    "port": "PGPORT",
-    "dbname": "PGDATABASE",
-    "user": "PGUSER",
-    "password": "PGPASSWORD",
+# Where the server is and which database to open, shared by every role.
+DB_LOCATION_ENV = {
+    "host": "DB_HOST",
+    "port": "DB_PORT",
+    "dbname": "DB_NAME",
+}
+
+# Who connects. The runtime account is least-privilege; the owner account does
+# schema setup and the bulk load only (see sql/roles.sql). Keeping them under
+# different variable names means a run cannot silently use the wrong account.
+ROLE_ENV = {
+    "app": {"user": "DB_USER", "password": "DB_PASSWORD"},
+    "owner": {"user": "DB_OWNER_USER", "password": "DB_OWNER_PASSWORD"},
 }
 
 
@@ -64,31 +76,54 @@ def _config_from_url(url):
     }
 
 
-def get_db_config(database_url=None):
-    """Read connection settings from the environment (populated from .env if present).
+def _require(name):
+    """Return the environment variable's value, naming the variable if it is unset.
 
-    DATABASE_URL is the primary setting, so one variable configures both this
-    module and the ORM, and a test can point the whole application at a
-    disposable database. The PG* variables Module 3 used remain as a fallback,
-    so an existing .env keeps working unchanged.
+    Raises:
+        KeyError: carrying the variable's name and never any value.
+    """
+    try:
+        return os.environ[name]
+    except KeyError:
+        raise KeyError(f"{name} is not set; see .env.example") from None
+
+
+def get_db_config(database_url=None, role="app"):
+    """Read connection settings for a role (populated from .env if present).
+
+    Precedence, highest first:
+        1. the explicit ``database_url`` argument, as create_app() passes when
+           a test overrides the configuration;
+        2. the DATABASE_URL environment variable, an override for CI and tests;
+        3. DB_HOST, DB_PORT, and DB_NAME, plus DB_USER and DB_PASSWORD for the
+           ``app`` role, or DB_OWNER_USER and DB_OWNER_PASSWORD for ``owner``.
+
+    Module 3's PG* variables are no longer read: two parallel settings would
+    let a misconfigured run quietly use the wrong account.
 
     Read at call time rather than import time, so importing this module
     (for example from a test) does not fail when nothing is set.
 
     Args:
-        database_url: an explicit URL, as create_app() passes when a test
-            overrides the configuration. Takes precedence over the environment.
+        database_url: an explicit URL. Takes precedence over the environment.
+        role: ``"app"`` for the runtime account, ``"owner"`` for schema setup
+            and bulk loading.
 
     Returns:
         dict: host, port, dbname, user, and password for psycopg.connect().
 
     Raises:
-        KeyError: when no URL is given or set and a PG* variable is missing.
+        ValueError: when ``role`` is not a known role.
+        KeyError: when no URL is given or set and a variable is missing. The
+            message names the variable and never reveals a value.
     """
+    if role not in ROLE_ENV:
+        raise ValueError(f"Unknown database role {role!r}; expected one of {sorted(ROLE_ENV)}")
     url = database_url or os.environ.get("DATABASE_URL")
     if url:
         return _config_from_url(url)
-    return {key: os.environ[name] for key, name in PG_ENV_KEYS.items()}
+    names = {**DB_LOCATION_ENV, **ROLE_ENV[role]}
+    return {key: _require(name) for key, name in names.items()}
 
 
 def create_connection(config):
@@ -99,6 +134,13 @@ def create_connection(config):
     reliable way to get real BEGIN/COMMIT boundaries: without autocommit, a
     plain read opens an implicit transaction and a later transaction() block
     becomes a savepoint inside it rather than committing.
+
+    On failure this logs the exception's type and a fixed hint, not its text.
+    libpq error text can echo the host, port, and user name, which would put
+    connection details into terminals and CI logs.
+
+    Returns:
+        psycopg.Connection, or None when the connection could not be opened.
     """
     connection = None
     try:
@@ -111,8 +153,12 @@ def create_connection(config):
             autocommit=True,
         )
         print("Connection to PostgreSQL DB successful")
-    except OperationalError as e:
-        print(f"The error '{e}' occurred")
+    except OperationalError as error:
+        logger.error(
+            "Could not connect to the database (%s). Check that PostgreSQL is "
+            "running and that the DB_* settings in .env, or DATABASE_URL, are correct.",
+            type(error).__name__,
+        )
     return connection
 
 

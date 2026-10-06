@@ -36,8 +36,17 @@ Installation
 Environment variables
 ---------------------
 
-``DATABASE_URL`` is the primary connection setting, read by both the
-psycopg code in ``load_data.py`` and the SQLAlchemy code in ``models.py``:
+The connection settings come from the environment, populated from a ``.env``
+file in ``module_5/`` if one exists (copy ``.env.example``). Both the psycopg
+code in ``load_data.py`` and the SQLAlchemy code in ``models.py`` read them.
+``DB_HOST``, ``DB_PORT``, and ``DB_NAME`` locate the database. ``DB_USER`` and
+``DB_PASSWORD`` are the runtime account the web app and Pull Data use.
+``DB_OWNER_USER`` and ``DB_OWNER_PASSWORD`` are a separate owner account for
+schema setup and the bulk load, kept out of the running app's environment.
+
+``DATABASE_URL`` is an optional single-URL override, used by CI and tests. It
+takes precedence over ``DB_*``, and an explicit ``database_url`` argument takes
+precedence over both:
 
 .. code-block:: console
 
@@ -46,14 +55,14 @@ psycopg code in ``load_data.py`` and the SQLAlchemy code in ``models.py``:
 A bare ``postgresql://`` URL has the ``+psycopg`` driver supplied
 automatically. A password containing ``@``, ``/``, or ``:`` must be
 percent-encoded by whoever sets the variable; the application decodes it
-correctly once it is.
+correctly once it is. A missing ``DB_*`` variable raises ``KeyError`` naming
+the variable and never a value.
 
-If ``DATABASE_URL`` is unset, both modules fall back to the ``PG*``
-variables Module 3 used (``PGHOST``, ``PGPORT``, ``PGDATABASE``, ``PGUSER``,
-``PGPASSWORD``), populated from a ``.env`` file in ``module_4/`` if one
-exists. ``create_app(database_url=...)`` lets tests override the setting
-directly, which is what keeps a test run from ever reaching a developer's
-real database by accident; see :doc:`testing`.
+The libpq ``PG*`` variables Module 3 used are no longer read. The test suite
+takes its database from ``TEST_DATABASE_URL``, and
+``create_app(database_url=...)`` lets a test override the setting directly,
+which is what keeps a test run from ever reaching a developer's real database
+by accident; see :doc:`testing`.
 
 Running the application
 -----------------------

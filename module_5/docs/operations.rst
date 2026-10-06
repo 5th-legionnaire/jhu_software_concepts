@@ -48,21 +48,25 @@ Troubleshooting
 
 **PostgreSQL is not running, or the connection settings are wrong.**
 ``load_data.create_connection()`` catches the connection failure and
-returns ``None`` rather than raising; callers print the error and stop
-cleanly. The Flask page returns ``503`` with a notice naming the problem;
+returns ``None`` rather than raising; it logs the exception's type and a fixed
+hint, never the driver's message, which can echo the host and user name.
+Callers stop cleanly. The Flask page returns ``503`` with a notice naming the problem;
 ``POST /pull-data`` and ``POST /update-analysis`` return ``500``/``503``
 with ``{"ok": false, "error": ...}``. Check that PostgreSQL is running and
-that ``DATABASE_URL`` (or the ``PG*`` fallbacks) point at it.
+that the ``DB_*`` settings in ``.env`` (or ``DATABASE_URL``) point at it.
 
-**DATABASE_URL is unset.** Both ``load_data.get_db_config()`` and
-``models.build_url()`` fall back to the ``PG*`` variables. If neither is
-set, ``get_db_config()`` raises ``KeyError`` naming the missing variable.
+**A connection setting is missing.** Both ``load_data.get_db_config()`` and
+``models.build_url()`` use an explicit URL, then ``DATABASE_URL``, then the
+``DB_*`` variables. If none is set, ``get_db_config()`` raises ``KeyError``
+naming the missing variable and never a value.
 
 **Running the test suite with no PostgreSQL available.** The ``web``,
 ``buttons``, and ``analysis`` markers need none at all. The ``db`` and
 ``integration`` markers do; ``clean_db`` fails loudly with a message naming
 what to start, rather than skipping silently, since a silent skip would
-quietly reduce coverage while looking like a neutral result.
+quietly reduce coverage while looking like a neutral result. They also need
+``TEST_DATABASE_URL`` to name a disposable database; without it ``clean_db``
+fails with a message saying so.
 
 **Chrome or ChromeDriver mismatch, during a real Pull Data.** Selenium
 Manager resolves a matching ChromeDriver automatically; no separate driver

@@ -224,6 +224,34 @@ assert 'Q1' in response.get_data(as_text=True)
             || fail G9 "fresh_install_check.sh failed; see .gate/phase-1-fresh.log"
         ok G9 "fresh install passes with pip and uv"
         ;;
+    2)
+        # No Module 3 variable survives in code, tests, or the Sphinx docs.
+        if grep -rn "PG\(HOST\|USER\|PASSWORD\|DATABASE\|PORT\)" src tests docs; then
+            fail G9 "a retired PG* variable is still referenced"
+        fi
+        ok G9 "no PG* reference in src, tests, or docs"
+
+        [ -f .env.example ] || fail G9 ".env.example is missing"
+        git -C "$MODULE_DIR" check-ignore -q .env || fail G9 ".env is not gitignored"
+        git -C "$MODULE_DIR" check-ignore -q .env.example && fail G9 ".env.example is gitignored"
+        ok G9 ".env.example tracked, .env ignored"
+
+        # The app reads its database settings from .env alone: run it with a
+        # cleared environment, so nothing can come from the shell.
+        env -i HOME="$HOME" PATH="$PATH" PYTHONPATH=src "$PY" -c "
+from app import create_app
+response = create_app().test_client().get('/analysis')
+assert response.status_code == 200, response.status_code
+assert 'Q1' in response.get_data(as_text=True)
+" >/dev/null 2>&1 || fail G9 "the app did not start from .env with an empty shell environment"
+        ok G9 "app renders /analysis from .env with an empty shell environment"
+
+        # A clean copy has no .env, so the offline tests must pass with no
+        # database configured at all (the fresh-install check does exactly that).
+        scripts/fresh_install_check.sh --worktree >"$GATE_DIR/phase-$1-fresh.log" 2>&1 \
+            || fail G9 "fresh_install_check.sh failed; see .gate/phase-$1-fresh.log"
+        ok G9 "fresh install passes with pip and uv, no .env, no database configured"
+        ;;
     *)
         echo "  --  G9  no phase-specific checks defined for phase $1 yet"
         ;;

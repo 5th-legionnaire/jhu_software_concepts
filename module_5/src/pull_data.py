@@ -26,7 +26,7 @@ with a plain callable. Every outward dependency reaches this module as an
 argument: the browser, the LLM standardizer, the database connection, and even
 the politeness delay between page requests.
 
-Usage (from module_4/):
+Usage (from module_5/):
     python3 src/pull_data.py
 """
 
@@ -48,7 +48,7 @@ from load_data import create_connection, create_table, get_db_config, insert_rec
 from models import Applicant, get_session
 
 # The working directory, the bulk JSON, and the LLM standardizer all live in
-# module_4/, one level above this file's src/.
+# module_5/, one level above this file's src/.
 PROJECT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WORK_DIR = os.path.join(PROJECT_DIR, "pull_work")          # gitignored
 PAGES_DIR = os.path.join(WORK_DIR, "pages")

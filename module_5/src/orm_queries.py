@@ -24,7 +24,7 @@ Validity ranges, matching patterns, and output formatters are imported from
 query_data.py (constants and functions only; none of its SQL), so the raw SQL
 and ORM answers apply identical filters and identical formatting.
 
-Usage (from module_4/):
+Usage (from module_5/):
     python3 src/orm_queries.py          # Part 6 results
     python3 src/orm_queries.py --sql    # also print the SQL SQLAlchemy generates
 """

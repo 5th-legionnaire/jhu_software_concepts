@@ -16,7 +16,7 @@ Every analysis is expressed in SQL. Python only executes the queries and
 formats the results. The SQL strings are module-level constants so the exact
 text that runs is the text quoted in query_results.pdf.
 
-Usage (from module_4/):
+Usage (from module_5/):
     python3 src/query_data.py
 """
 

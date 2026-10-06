@@ -1,10 +1,12 @@
-# EN 605.256 Modern Software Concepts in Python: Module 4
+# EN 605.256 Modern Software Concepts in Python: Module 5
 
 **Name:** Joshua Latz
 **JHED ID:** jlatz1
-**Module:** Module 4, Assignment: Testing and Documentation
-**Repository:** `git@github.com:5th-legionnaire/jhu_software_concepts.git`. This assignment lives under `module_4/`.
+**Module:** Module 5, Assignment: Software Assurance and Secure SQL (SQLi Defense)
+**Repository:** `git@github.com:5th-legionnaire/jhu_software_concepts.git`. This assignment lives under `module_5/`.
 **Documentation:** <https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/latest/>
+(still serving Module 4 until Read the Docs is repointed at the end of Module 5, with Module 4 kept
+reachable at the `module-4-final` tag)
 **Python:** 3.14.6 (CPython, macOS)
 **PostgreSQL:** 18.6 (Homebrew)
 
@@ -13,11 +15,22 @@
 > "section 5.2"; renumbering during this module broke those references silently.
 > Source comments now name headings by title instead.
 
-**Module 5 work in progress.** This folder began as a copy of `module_4/`.
-The sections from "Deliverables checklist" onward still describe Module 4
-and are rewritten in Phase 10 of [PLAN.md](PLAN.md). The two sections below
-are maintained from Phase 0 on: every design change from Module 4, and every
-change to the plan itself.
+## Status
+
+This README is a **first pass, written while Module 5 is being built.** The
+build follows [PLAN.md](PLAN.md) in gated phases. Each phase must pass
+`scripts/gate.sh` (tests, 100% coverage, Pylint, secrets scan, Change Register)
+before it is committed, and the [Gate Log](PLAN.md) records each result.
+**Complete as of this commit: Phases 0 to 2** (scaffold and gate tooling;
+packaging and the pinned lock; configuration and secrets). **Not started:**
+SQL composition and `LIMIT`, `GET /api/applicants`, the least-privilege
+database role, Pylint 10.00/10, the dependency graph, Snyk, the CI workflow,
+and the PDF report. Sections below that describe those are marked *pending*.
+The sections from "Architecture" onward still describe the Module 4 baseline
+and are brought up to date in Phase 10.
+
+Two sections are maintained from the first phase on: every design change from
+Module 4, and every change to the plan itself.
 
 ## Changes from Module 4
 
@@ -90,6 +103,64 @@ Changing a dependency means editing `setup.py` and rerunning
 `::test_lock_satisfies_setup_py_ranges`. That last test fails if `setup.py`
 is edited without regenerating the lock. The uv leg of
 `scripts/fresh_install_check.sh` runs too.
+
+<a id="chg-03"></a>
+
+### CHG-03: `DB_*` variables, role-aware `get_db_config`, and no `PG*`
+
+**Problem.** The assignment names `DB_HOST`, `DB_PORT`, `DB_NAME`, `DB_USER`,
+and `DB_PASSWORD`. Module 4 read `DATABASE_URL` first and five `PG*` variables
+as a fallback. Keeping both would leave two parallel contracts, so a
+misconfigured run could use the wrong account without anyone noticing. Module 5
+also needs two accounts, a runtime one and an owner (Phase 5), and nothing in
+Module 4 said which a call site meant.
+
+**Decision.** `get_db_config(database_url=None, role="app")` resolves in this
+order: the explicit argument, then `DATABASE_URL`, then `DB_HOST`, `DB_PORT`,
+and `DB_NAME` with `DB_USER` and `DB_PASSWORD` for `app` or `DB_OWNER_USER` and
+`DB_OWNER_PASSWORD` for `owner`. The `PG*` variables are not read at all.
+`models.build_url()` follows the same contract. A missing variable raises
+`KeyError` naming the variable and never a value, and an unknown role raises
+`ValueError`. `.env.example` documents every variable, and the app role never
+borrows the owner's credentials, so a missing `DB_USER` fails rather than
+falling through.
+
+**Trade-off.** An existing Module 4 `.env` stops working until its keys are
+renamed. `DATABASE_URL` is the one override that applies to both roles, as
+planned: if it names the app account, a run asking for the owner role gets
+the app account, and its DDL then fails loudly with a privilege error rather
+than succeeding as the wrong user.
+
+**Verified by.** `tests/test_config.py`: `test_precedence_*` (explicit URL beats
+`DATABASE_URL` beats `DB_*`), `test_owner_role_reads_owner_vars`,
+`test_missing_var_names_variable_not_value` (parametrized over every variable),
+`test_pg_variables_are_no_longer_read`, `test_no_source_file_reads_a_pg_variable`,
+and `test_env_example_lists_every_variable_the_code_reads`.
+
+<a id="chg-04"></a>
+
+### CHG-04: connection errors are logged sanitized
+
+**Problem.** `create_connection()` printed the driver's exception text. libpq
+writes the host, port, and user name into that text, for example `connection to
+server at "db.internal" (10.0.0.9), port 5432 failed: FATAL: password
+authentication failed for user "gradcafe_app"`. Printing it puts connection
+details into terminals and CI logs.
+
+**Decision.** It now logs at `ERROR` the exception's type and a fixed hint to
+check that PostgreSQL is running and the `DB_*` settings are correct. The
+driver's text is not logged.
+
+**Trade-off.** A developer no longer sees why the connection failed. A
+wrong password and a stopped server read the same, and the way to tell them
+apart is `psql` with the same settings. `execute_query()` still prints
+statement errors unchanged: they are not connection errors, and Phase 3
+revisits them when the SQL is rewritten.
+
+**Verified by.**
+`tests/test_config.py::test_connection_error_message_is_sanitized` feeds a
+realistic libpq message and asserts that none of its host, address, port, or
+user name appears in the log or on stdout or stderr.
 
 <a id="chg-18"></a>
 
@@ -216,6 +287,52 @@ This list mirrors them.
   Register row is needed, since this is tooling and not a change to Module 4
   behavior.
 
+### Phase 2 amendments
+
+- **A2.1 `.env.example` and the entry check.** The plan's entry check says a
+  local `.env` is "built from `.env.example`", but `.env.example` is a task of
+  this phase. The local `.env` was migrated by hand instead: the five `PG*`
+  keys were renamed to `DB_*` with their values unchanged, and a
+  `TEST_DATABASE_URL` line was added. Values were never printed or committed.
+- **A2.2 The example database is `gradcafedb`.** The plan's `.env.example` says
+  `DB_NAME=gradcafe`. The database Module 3 and 4 used, and this README's
+  setup section, is `gradcafedb`, so the example matches it.
+- **A2.3 `TEST_DATABASE_URL` was pulled forward from Phase 5, on purpose.**
+  CHG-13 introduces it in Phase 5. This phase's secrets check retires the
+  `postgres:postgres@localhost` fallback that `tests/conftest.py` carried from
+  Module 4, so tests needed an environment-only source for the test database
+  now. `db_url` returns `TEST_DATABASE_URL` and has no default. When it is
+  unset, offline tests get a URL naming no user or password at an unreachable
+  port, so they cannot find a real database, and `clean_db` fails with a
+  message naming the variable. Phase 5 adds `TEST_ADMIN_DATABASE_URL` and the
+  app/owner split on top of this, so CHG-13 becomes a split and not an
+  introduction.
+- **A2.4 `tests.yml` keeps its `PG*` variables.** Task 4 says to remove every
+  `PG*` reference from CI. `.github/workflows/tests.yml` runs Module 4, is
+  required to stay untouched, and `module_4/` still reads `PG*`, so it
+  is correct as it is. Module 5's workflow, `ci.yml` in Phase 9, is written
+  without them.
+- **A2.5 The retired variable names are assembled from parts in tests.** The
+  exit check is a literal `grep` for them across `src/` and `tests/`, and tests
+  that prove they are gone have to name them. Building the names at runtime
+  keeps the grep literal and meaningful.
+- **A2.6 Stale paths in `src/` docstrings.** Five files still said
+  `Usage (from module_4/)`, and `pull_data.py` had a comment about `module_4/`.
+  These are paths, not provenance, so they now say `module_5/`.
+- **A2.7 Documentation.** `docs/overview.rst`, `docs/operations.rst`,
+  `docs/testing.rst`, and the README's "Connection settings" section now
+  describe `DB_*`. The README's Module 4 history sections, including "Changes to
+  carried-over code", are left as the record of Module 4 and are rewritten in
+  Phase 10.
+
+- **A2.8 First pass on this README.** Requested during the Phase 2 review. It
+  adds the Module 5 header, a status note, a deliverables checklist built from
+  the assignment's own list (ticked only where the file exists), a Module 5
+  overview and repository structure, Fresh Install for pip and uv, an
+  environment-variable table, and the security-tooling commands, with each
+  pending item marked. The rest of the README, from "Architecture" onward,
+  still describes the Module 4 baseline until Phase 10.
+
 ### Phase 6 amendments, decided in advance
 
 - **A6.1 Compiled-SQL check allows exactly the Phase 3 LIMIT.** Phase 3
@@ -229,110 +346,117 @@ This list mirrors them.
 
 ## Deliverables checklist
 
-Checked against the assignment's own numbered deliverables list, each item
-verified against the repository as it stands rather than assumed.
+From the assignment's "Final Deliverables" and its expected directory
+structure. A box is ticked only when the item exists in the repository now;
+the rest name the phase that produces them.
 
-- [x] **SSH URL to the GitHub repository** —
-      `git@github.com:5th-legionnaire/jhu_software_concepts.git` (above).
-- [x] **README under `module_4`** — this file.
-- [x] **`requirements.txt` under `module_4`** — [requirements.txt](requirements.txt),
-      Module 4 specific, covering the app, ETL, tests, coverage, and Sphinx.
-- [x] **Sphinx-generated HTML** — `docs/` builds clean with the exact
-      command below (zero warnings, zero errors) and is published live; see
-      [Documentation](#documentation). The build output itself is not
-      committed, matching this project's own `.gitignore` and the rubric's
-      own wording ("built under `module_4/docs/`" plus "published ... and
-      linked from the README," neither of which names a committed
-      `_build/` directory).
-- [x] **Proof of coverage, `coverage_summary.txt` under `module_4`** —
-      [coverage_summary.txt](coverage_summary.txt): 102 tests, 100.00% coverage.
-- [x] **Proof of successful GitHub Actions CI** —
-      [actions_success.png](actions_success.png) (a real, verified green run,
-      not a staged image) and [`../.github/workflows/tests.yml`](../.github/workflows/tests.yml)
-      directly under the repository root, not under `module_4`.
-- [x] **Link to the Read the Docs documentation** — in the header above and
-      in [Documentation](#documentation).
-- [x] **All listed test files, under `module_4`** — the five the assignment
-      names, plus five more `--cov-fail-under=100` made necessary; see
-      [The five files beyond the required five](#the-five-files-beyond-the-required-five).
-- [x] **Submitted to both Canvas and the public GitHub repository** — the
-      repository is public, this commit is pushed, and the assignment is
-      submitted on Canvas.
-
-Verified, not assumed, while building this list: every one of the 102 tests
-carries a required marker (`pytest -m "web or buttons or analysis or db or
-integration"` collects exactly 102, the same as collecting with no marker
-filter at all, so nothing is silently excluded or silently unmarked).
+- [x] **`module_5/` carried over from Module 4**, the working application and
+      its tests, with Module 4 itself left untouched.
+- [x] **`setup.py`** (Phase 1), [setup.py](setup.py): flat modules, runtime
+      dependencies, and a `dev` extra.
+- [x] **`requirements.txt`** (Phase 1), [requirements.txt](requirements.txt):
+      a fully pinned lock of 70 packages including `pylint` and `pydeps`,
+      generated from `setup.py` by `scripts/regen_lock.sh`.
+- [x] **`.env.example`** (Phase 2), [.env.example](.env.example), with `.env`
+      gitignored.
+- [x] **`pytest.ini`**, [pytest.ini](pytest.ini).
+- [x] **Fresh install by pip and by uv** (Phase 1), proved by
+      `scripts/fresh_install_check.sh`; see [Fresh Install](#fresh-install).
+- [ ] **SQL injection defenses**: composed SQL, parameters, separated
+      construction and execution (Phases 3 and 4).
+- [ ] **`LIMIT` on every query, with an enforced maximum** (Phases 3 and 4).
+- [ ] **Least-privilege database role** (Phase 5), with `privileges.png`.
+- [ ] **10/10 Pylint evidence**, `pylint_report.txt` (Phase 6). The command is
+      documented under [Security tooling](#security-tooling).
+- [ ] **`dependency.svg`** (Phase 7).
+- [ ] **`snyk-analysis.png`**, and for extra credit `snyk-code-analysis.png`
+      (Phase 8).
+- [ ] **`.github/workflows/ci.yml`** and **`actions_success.png`** (Phase 9).
+- [ ] **`coverage_summary.txt`**: the committed file is still Module 4's
+      (102 tests); it is regenerated in Phase 10.
+- [ ] **`module_5_report.pdf`** (Phase 10).
+- [ ] **Canvas zip and GitHub push, matching** (Phase 11).
 
 ## Overview
 
-This module adds an automated test suite, continuous integration, and published
-documentation to the Grad Café analytics service built in Module 3. The
-application itself is unchanged in purpose: it loads scraped applicant data into
-PostgreSQL, analyzes it with raw SQL and the SQLAlchemy ORM, and serves an
-analysis page that can pull newly posted Grad Café entries on demand.
+This module hardens the Grad Café analytics service built in Module 3 and
+tested in Module 4. The application is unchanged in purpose: it loads scraped
+applicant data into PostgreSQL, analyzes it with raw SQL and the SQLAlchemy
+ORM, and serves an analysis page that can pull newly posted entries on demand.
+Module 5 adds software assurance around it: the code is packaged and its
+environment pinned, credentials come only from the environment, SQL is
+composed and parameterized, reads are bounded, the database account is
+least-privilege, and static analysis, a dependency graph, and a supply-chain
+scan run in CI.
 
-What is new in Module 4:
+| Area | What Module 5 does | Where | Status |
+| --- | --- | --- | --- |
+| Packaging | `setup.py` with flat modules; editable install | `setup.py` | done |
+| Reproducible environment | pinned lock, installs with pip and uv | `requirements.txt`, `scripts/` | done |
+| Secrets | `DB_*` variables, `.env.example`, sanitized connection errors | `src/load_data.py`, `.env.example` | done |
+| SQL injection defenses | composed, parameterized SQL | `src/query_data.py`, `src/load_data.py` | pending |
+| `LIMIT` enforcement | every query bounded, maximum enforced | `src/db_safety.py` | pending |
+| Searchable endpoint | `GET /api/applicants` | `src/applicant_search.py` | pending |
+| Least privilege | owner and runtime roles | `sql/` | pending |
+| Pylint 10.00/10 | fixes in code, no inline disables | `src/` | pending |
+| Dependency graph | pydeps and Graphviz | `dependency.svg` | pending |
+| Snyk | dependency and code scans | `snyk-analysis.png` | pending |
+| CI | lint, graph, Snyk, and tests as four jobs | `.github/workflows/ci.yml` | pending |
 
-| Deliverable | Where |
-| --- | --- |
-| Pytest suite across five required files | `tests/` |
-| Markers and the 100% coverage gate | `pytest.ini` |
-| Proof of coverage | `coverage_summary.txt` |
-| Continuous integration with PostgreSQL | `../.github/workflows/tests.yml` |
-| Proof of a green CI run | `actions_success.png` |
-| Sphinx documentation | `docs/`, published to Read the Docs |
-
-Making the Module 3 application testable required changes to code carried over
-from Modules 2 and 3. Those changes, and what forced each one, are described
-under [Changes to carried-over code](#changes-to-carried-over-code).
+Every change made to the Module 4 code, and why, is recorded in the
+[Change Register](CHANGES.md) and explained under
+[Changes from Module 4](#changes-from-module-4). Changes Module 4 made to the
+Module 3 code are described under
+[Changes to carried-over code](#changes-to-carried-over-code).
 
 ## Repository structure
 
 ```text
-module_4/
-├── src/                        application code
+module_5/
+├── src/                        application code, flat modules
 │   ├── app.py                  Flask factory, analysis page, button routes
 │   ├── pull_data.py            pull orchestration and its injection seams
 │   ├── scrape.py               Grad Café page fetching (Module 2)
 │   ├── clean.py                page parsing into records (Module 2)
-│   ├── load_data.py            PostgreSQL connection, schema, and loader
+│   ├── load_data.py            connection settings, schema, and loader
 │   ├── models.py               SQLAlchemy Applicant model and session factory
 │   ├── query_data.py           raw SQL analyses and the output formatters
 │   ├── orm_queries.py          the same analyses through the ORM
+│   ├── db_safety.py            query limits and input checks (stub; Phase 3)
+│   ├── applicant_search.py     GET /api/applicants search (stub; Phase 4)
 │   ├── templates/index.html    the analysis page
 │   └── static/style.css        page styles
-├── tests/                      all test code
-│   ├── conftest.py             fixtures and test doubles
-│   ├── test_flask_page.py      factory and page rendering
-│   ├── test_buttons.py         button endpoints and busy-state gating
-│   ├── test_analysis_format.py labels and percentage formatting
-│   ├── test_db_insert.py       database writes, uniqueness, query contract
-│   ├── test_integration_end_to_end.py   pull → update → render
-│   ├── test_pull_pipeline.py   the real scraper orchestration and clean.py
-│   ├── test_scrape.py          URL building, page helpers, the batch scraper
-│   ├── test_query_data.py      the raw-SQL analyses, against a real database
-│   ├── test_orm_queries.py     the --sql debug output and main()
-│   └── test_models.py          the Applicant model and the default session
+├── tests/                      all test code; conftest.py holds the fixtures
+│   ├── snapshots/              Module 4 answers and compiled SQL, for parity tests
+│   ├── test_config.py          configuration and secrets handling
+│   ├── test_packaging.py       packaging and the lock
+│   ├── test_lint_policy.py     every test carries a marker
+│   ├── test_gate_checkers.py   the gate's own checkers
+│   └── test_*.py               the Module 4 suite, updated
+├── scripts/                    gate.sh, change-register and secrets checks,
+│                               lock regeneration, fresh-install check
 ├── docs/                       Sphinx project
 ├── data/                       bulk JSON input, never imported
 ├── llm_hosting/                instructor-provided LLM standardizer
-├── pytest.ini                  markers and the coverage gate
-├── requirements.txt
-├── README.md
-├── coverage_summary.txt        committed terminal coverage output
-└── actions_success.png         screenshot of a green CI run
+├── setup.py                    packaging and dependency source of truth
+├── requirements.txt            pinned lock generated from setup.py
+├── .env.example                every environment variable, placeholders only
+├── pytest.ini                  markers, strict markers, the coverage gate
+├── CHANGES.md                  the Change Register
+├── PLAN.md                     the execution plan and Gate Log
+└── README.md
 ```
 
-The five files the assignment names directly hold the required rubric
-behavior; the other five exist because `--cov-fail-under=100` is scoped to
-all of `src/`, not only the code those five reach. See
-[Testing](#testing) for why each exists and what it covers.
+`src/` modules import each other flatly (`from models import ...`). They
+resolve through the editable install of `setup.py` (see
+[CHG-01](#chg-01)); `src/` is deliberately not a package, because converting it
+would break parity with Module 3, where these files sat at the top level.
 
-`src/` modules import each other flatly (`from models import ...`), and
-`tests/conftest.py` puts `src/` on `sys.path`. `src/` is deliberately not a
-package: converting it would break parity with Module 3, where these files sat
-at the top level.
+Not yet present, and produced in later phases: `sql/` (role and grant
+scripts), `dependency.svg`, `snyk-analysis.png`, `pylint_report.txt`,
+`.pylintrc` content beyond the source root, `privileges.png`,
+`actions_success.png`, `module_5_report.pdf`, and
+`../.github/workflows/ci.yml`.
 
 ## Installation and setup
 
@@ -359,17 +483,23 @@ createdb gradcafe_test
 
 ### Connection settings
 
-`DATABASE_URL` is the primary connection setting and configures both the
-psycopg code and the ORM:
+Copy `.env.example` to `.env` and fill it in. `.env` is gitignored, and
+`python-dotenv` loads it from `module_5/` if it exists; variables already set
+in the shell take precedence. Both the psycopg code and the ORM read:
 
 ```bash
-DATABASE_URL=postgresql+psycopg://postgres:yourpassword@localhost:5432/gradcafedb
+DB_HOST=localhost
+DB_PORT=5432
+DB_NAME=gradcafedb
+DB_USER=gradcafe_app          # runtime account: the web app and Pull Data
+DB_PASSWORD=change-me
+# DB_OWNER_USER / DB_OWNER_PASSWORD: schema setup and bulk load only
 ```
 
-The libpq variables Module 3 used (`PGHOST`, `PGPORT`, `PGDATABASE`, `PGUSER`,
-`PGPASSWORD`) remain as a fallback, so an existing `.env` keeps working
-unchanged. `python-dotenv` populates both from a `.env` file in `module_4/` if
-one exists; variables already set in the shell take precedence.
+`DATABASE_URL` is an optional single-URL override, used by CI and tests. It
+takes precedence over `DB_*`. The test suite reads `TEST_DATABASE_URL`, a
+disposable database it truncates. The `PG*` variables Module 3 used are no
+longer read; see [CHG-03](#chg-03).
 
 Details worth knowing:
 
@@ -385,38 +515,71 @@ Details worth knowing:
 No credentials, hosts, or machine-specific paths are hard-coded anywhere, and
 `.env` is never committed.
 
-### Python environment
+### Environment variables
+
+Every variable the code reads, all set in `.env` (see `.env.example`) or the
+shell. A missing required variable raises an error that names the variable and
+never shows a value.
+
+| Variable | Used by | Required | Meaning |
+| --- | --- | --- | --- |
+| `DB_HOST` | every role | yes, unless `DATABASE_URL` is set | PostgreSQL host |
+| `DB_PORT` | every role | yes, unless `DATABASE_URL` is set | PostgreSQL port |
+| `DB_NAME` | every role | yes, unless `DATABASE_URL` is set | database name |
+| `DB_USER`, `DB_PASSWORD` | the `app` role: web app, Pull Data, ORM | yes, unless `DATABASE_URL` is set | runtime account |
+| `DB_OWNER_USER`, `DB_OWNER_PASSWORD` | the `owner` role: schema setup and bulk load | only for the owner role | owner account; keep out of the running app's environment |
+| `DATABASE_URL` | every role | no | single-URL override; beats `DB_*`, loses to an explicit argument |
+| `TEST_DATABASE_URL` | the test suite | for `db` and `integration` tests | disposable database the tests truncate |
+| `PORT` | `src/app.py` | no | port for the development server (default 8080) |
+
+All are read in `src/load_data.py` (`get_db_config`), `src/models.py`
+(`build_url`), and `tests/conftest.py`. The owner role is wired up with the
+least-privilege database in Phase 5; until then the runtime variables name the
+account you already use.
+
+### Fresh Install
 
 One environment covers the application, the ETL code, the test suite with
-coverage, and the Sphinx documentation build.
+coverage, linting, the dependency graph, and the Sphinx build. Dependencies are
+declared once, in `setup.py`; `requirements.txt` is the pinned lock generated
+from it. Python 3.14 is required (3.14.6 is what the project is developed and
+tested on). From a fresh clone, either way works:
+
+**pip**
 
 ```bash
-cd module_4
-python3 -m venv .venv
+cd module_5
+python3.14 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
+pip install -e . --no-deps
 ```
 
-| Package | Version | Used by |
-| --- | --- | --- |
-| `Flask` | 3.1.3 | `app.py` |
-| `psycopg[binary]` | 3.3.6 | `load_data.py`, `query_data.py`, SQLAlchemy's driver |
-| `SQLAlchemy` | 2.0.54 | `models.py`, `orm_queries.py`, `app.py` |
-| `python-dotenv` | 1.0.1 | connection settings |
-| `beautifulsoup4`, `soupsieve` | 4.15.0, 2.9.2 | `clean.py`, and page assertions in tests |
-| `selenium` | 4.49.0 | `scrape.py` |
-| `urllib3` | 2.7.0 | `scrape.py` (pinned as in Module 2) |
-| `pytest` | 8.4.2 | the test suite |
-| `pytest-cov` | 7.0.0 | the coverage gate |
-| `pytest-mock` | 3.15.1 | scraper and loader doubles |
-| `sphinx`, `sphinx-rtd-theme` | 8.2.3, 3.0.2 | `docs/` |
+**uv**
 
-The database driver is psycopg 3, whose PyPI package is named `psycopg`
-(`psycopg2` is the previous major version). The `[binary]` extra bundles libpq,
-so no PostgreSQL client headers or compiler are needed.
+```bash
+cd module_5
+uv venv -p 3.14 .venv
+source .venv/bin/activate
+uv pip sync requirements.txt
+uv pip install -e . --no-deps
+```
 
-Local development, CI, and Read the Docs all run Python 3.14. CI pins 3.14.6
-exactly; Read the Docs offers major.minor only, so it pins 3.14.
+The second line of each recipe is the editable install of the project itself.
+It is what lets the flat `src/` modules import each other from anywhere, and it
+is the only supported way to install the project: a plain `pip install .` would
+not carry `src/templates/` and `src/static/`, because flat modules have no
+package to hold package data. See [CHG-01](#chg-01) and [CHG-02](#chg-02).
+
+`scripts/fresh_install_check.sh` proves both recipes. It copies the committed
+tree into a temporary directory with no `.venv` and no `.env`, runs each recipe
+there, imports every module from outside `src/`, runs `pylint --version` and
+`pydeps --version`, and runs the offline tests. To add or change a dependency,
+edit `setup.py` and run `scripts/regen_lock.sh`; do not edit the lock by hand.
+
+The project targets Python 3.14. Module 4's CI workflow pins 3.14.6 exactly
+(Module 5's workflow follows in Phase 9), and Read the Docs offers major.minor
+only, so it pins 3.14.
 
 ### LLM standardizer setup
 
@@ -425,7 +588,7 @@ on `llama-cpp-python`, which compiles native code. Pull Data runs it in that
 environment.
 
 ```bash
-cd module_4/llm_hosting
+cd module_5/llm_hosting
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
@@ -446,7 +609,7 @@ argument, so the suite supplies a stand-in instead.
 
 ## How to run
 
-All commands run from `module_4/` with the main environment active.
+All commands run from `module_5/` with the main environment active.
 
 ### The application
 
@@ -481,6 +644,29 @@ types, and descriptions.
 ### The tests
 
 See [Testing](#testing).
+
+## Security tooling
+
+The commands are fixed here so that a reader can reproduce each result. All run
+from `module_5/` with the environment from [Fresh Install](#fresh-install)
+active.
+
+| Tool | Command | Reads as | Status |
+| --- | --- | --- | --- |
+| Pylint | `pylint --rcfile=.pylintrc --fail-under=10 src` | must print `rated at 10.00/10` with no message lines | pending (Phase 6); currently 8.31/10 |
+| pydeps | `pydeps src/app.py --noshow -T svg -o dependency.svg` | needs Graphviz's `dot` on the path | pending (Phase 7) |
+| Snyk, dependencies | `snyk test --file=requirements.txt --package-manager=pip --command=python` | lists known vulnerabilities in the pinned packages | pending (Phase 8) |
+| Snyk Code | `snyk code test` | static analysis of `src/` (extra credit) | pending (Phase 8) |
+
+Pylint is run on `src/` only, as the assignment requires, and the project
+carries no inline `# pylint: disable`; findings are fixed in the code. The one
+configuration file, `.pylintrc`, says where the source lives and relaxes no
+rule.
+
+Two scripts guard the repository itself: `scripts/check_secrets.py` fails if a
+credential-shaped literal appears in `src/` or `tests/`, and
+`scripts/gate.sh` runs the checks above together with the tests before a phase
+may be committed.
 
 ## Architecture
 
@@ -605,6 +791,8 @@ the pull now has the page to itself and the figure shown is never
 half-superseded.
 
 ### `DATABASE_URL` replaces the `PG*` variables as the primary setting
+
+*Module 4 history. Module 5 removed the `PG*` fallbacks; see [CHG-03](#chg-03).*
 
 **Before.** `get_db_config()` read five `PG*` variables with `os.environ[...]`,
 and `models.get_engine()` was `lru_cache`d on them.
@@ -776,13 +964,18 @@ below 5.00% of the dataset so thin evidence reads as thin.
 
 ## Testing
 
-The full suite runs from `module_4/`, because `pytest.ini` scopes coverage to
-`src/` relative to itself:
+The full suite runs from `module_5/`, because `pytest.ini` scopes coverage to
+`src/` relative to itself. Module 5 runs every collected test, with no marker
+expression (see [CHG-18](#chg-18)):
 
 ```bash
-cd module_4
-pytest -m "web or buttons or analysis or db or integration"
+cd module_5
+pytest
 ```
+
+The `db` and `integration` tests need `TEST_DATABASE_URL` to name a disposable
+database; the rest run with no database at all. *The marker table, counts, and
+coverage output below are Module 4's, and are regenerated in Phase 10.*
 
 Every test carries at least one marker; unmarked tests are not permitted.
 `pytest.ini`'s marker text is the assignment's own required wording, quoted
@@ -912,7 +1105,7 @@ Published at <https://jhu-software-concepts-5thlegionnaire.readthedocs.io/en/lat
 The Sphinx project lives in `docs/`. To build it locally:
 
 ```bash
-cd module_4
+cd module_5
 sphinx-build -b html docs docs/_build/html
 ```
 

@@ -77,7 +77,7 @@ halves of the suite:
 Faking ``query`` as well as the scraper and loader is what keeps ``POST
 /update-analysis`` from reaching PostgreSQL even when a pull is not in
 progress, which is what makes all 24 of those tests run in well under a
-tenth of a second with no ``DATABASE_URL`` set at all. ``db_client`` serves
+tenth of a second with no database configured at all. ``db_client`` serves
 ``db`` and ``integration`` tests; its scraper is still faked, so even these
 tests never reach Grad Cafe, but its loader and queries are real, against
 the disposable database the ``clean_db`` fixture truncates before and after
@@ -98,8 +98,11 @@ Other fixtures:
 - ``fake_query``: a fixed ``{"summary": ..., "results": ...}``, chosen so
   every formatter is exercised, including a percentage that is not already
   round.
-- ``db_url``: ``DATABASE_URL`` if set (as CI sets it), else a local
-  fallback pointing at ``gradcafe_test``.
+- ``db_url``: ``TEST_DATABASE_URL``. There is no default, because a
+  credential written into the suite is a credential in the repository. When
+  it is unset, offline tests get a URL naming no user or password at an
+  unreachable port, so they cannot find a real database, and ``clean_db``
+  fails with a message naming the variable.
 
 Beyond the five required files
 -------------------------------
