@@ -375,7 +375,7 @@ equals the non-comment line count. CHG-01 and CHG-02 are `done` with README subs
 - **A1.7** `tests/test_gate_checkers.py` tests `check_secrets.py`, `check_change_register.py`, and
   `gate.sh log` against inputs they must reject, so the gate's own checks cannot loosen unnoticed.
 
-### Phase 2: Configuration and secrets (CHG-03, CHG-04)
+### Phase 2: Configuration and secrets (CHG-03, CHG-04) (COMPLETE)
 
 **Entry:** standard. A local `.env` exists, built from `.env.example`. Josh's real values never get committed.
 
@@ -828,3 +828,4 @@ Appended by `gate.sh` at each phase exit.
 | baseline | 2026-10-05 | 1ecf2c9 | 102 | 100% | 8.36 | module_4 HEAD |
 | 0 | 2026-10-05 20:06 | 13acd9f | 107 | 100.00% | 8.30 | Scaffold, snapshots, gate tooling, CHG-18. Pylint baseline 8.30 measured (plan said 8.36); amendments A0.1 to A0.9. |
 | 1 | 2026-10-05 20:34 | 2bd7d2b | 114 | 100.00% | 8.30 | setup.py, universal 70-pin lock, editable install, fresh install with pip and uv; amendments A1.1 to A1.5. |
+| 2 | 2026-10-05 21:53 | a00ebfa | 189 | 100.00% | 8.31 | DB_* config with roles, sanitized connection errors, .env.example, TEST_DATABASE_URL pulled forward, README first pass; amendments A2.1 to A2.8. |
