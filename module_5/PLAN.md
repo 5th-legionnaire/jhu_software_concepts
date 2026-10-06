@@ -369,6 +369,11 @@ equals the non-comment line count. CHG-01 and CHG-02 are `done` with README subs
 - **A1.4** The fresh-install pytest run uses `--no-cov`, since deselecting `db` and `integration` would
   fail the 100% gate. The full gate still enforces 100%.
 - **A1.5** `*.egg-info/` and `build/` are gitignored (the editable install writes `src/*.egg-info`).
+- **A1.6** Two `gate.sh` bugs fixed: the Gate Log row check now searches only from the `## 11. Gate Log`
+  heading (earlier tables have rows beginning `| 1 |`), and `log` marks the heading `(COMPLETE)` before
+  appending the row, including headings that end in `)`.
+- **A1.7** `tests/test_gate_checkers.py` tests `check_secrets.py`, `check_change_register.py`, and
+  `gate.sh log` against inputs they must reject, so the gate's own checks cannot loosen unnoticed.
 
 ### Phase 2: Configuration and secrets (CHG-03, CHG-04)
 

@@ -55,6 +55,15 @@ check_venv() {
     ok E3 "module_5/.venv, Python $version"
 }
 
+# True when the Gate Log (section 11 of PLAN.md) has a row for phase $1. The
+# search starts at that heading because earlier tables also have rows that
+# begin "| 1 |", such as the Pylint message counts.
+gate_log_has_row() {
+    awk -v n="$1" '/^## 11\. Gate Log/ { in_log = 1 }
+                   in_log && $0 ~ ("^\\| " n " \\|") { found = 1 }
+                   END { exit !found }' "$PLAN"
+}
+
 pylint_score() {  # $1: output file
     grep -oE "rated at -?[0-9]+\.[0-9]+" "$1" | grep -oE -- "-?[0-9]+\.[0-9]+$"
 }
@@ -66,7 +75,7 @@ entry() {
         local prev=$((n - 1)) subject
         subject="$(git -C "$REPO" log -1 --format=%s)"
         case "$subject" in "M5 phase $prev"*) ;; *) fail E1 "HEAD is '$subject', expected 'M5 phase $prev...'" ;; esac
-        grep -qE "^\| $prev \|" "$PLAN" || fail E1 "Gate Log has no row for phase $prev"
+        gate_log_has_row "$prev" || fail E1 "Gate Log has no row for phase $prev"
         ok E1 "phase $prev committed and logged"
     else
         ok E1 "phase 0 has no predecessor"
@@ -142,7 +151,7 @@ gate() {
         grep -qE "^\| baseline \|" "$PLAN" || fail G8 "Gate Log has no baseline row"
     else
         local prev_n=$((n - 1))
-        grep -qE "^\| $prev_n \|" "$PLAN" || fail G8 "Gate Log has no row for phase $prev_n"
+        gate_log_has_row "$prev_n" || fail G8 "Gate Log has no row for phase $prev_n"
         grep -qE "^### Phase $prev_n:.*\(COMPLETE\)" "$PLAN" || fail G8 "phase $prev_n heading not marked COMPLETE"
     fi
     ok G8 "previous phase logged and marked"
@@ -230,16 +239,17 @@ log_row() {
     tree="$(git -C "$REPO" rev-parse 'HEAD^{tree}')"
     [ "$tree" = "$(grep '^tree=' "$pass" | cut -d= -f2)" ] \
         || fail G8 "HEAD's contents differ from what passed the gate; rerun scripts/gate.sh $n"
-    grep -qE "^\| $n \|" "$PLAN" && fail G8 "Gate Log already has a row for phase $n"
+    gate_log_has_row "$n" && fail G8 "Gate Log already has a row for phase $n"
     local commit when tests coverage pylint
     commit="$(git -C "$REPO" rev-parse --short HEAD)"
     when="$(TZ=America/New_York date "+%Y-%m-%d %H:%M")"
     tests="$(grep '^tests=' "$pass" | cut -d= -f2)"
     coverage="$(grep '^coverage=' "$pass" | cut -d= -f2)"
     pylint="$(grep '^pylint=' "$pass" | cut -d= -f2)"
+    # Heading first: a failure here leaves PLAN.md without a row, so a rerun is clean.
+    sed -i.bak -E "/^### Phase $n: /{/\(COMPLETE\)\$/!s/\$/ (COMPLETE)/;}" "$PLAN" && rm -f "$PLAN.bak"
+    grep -qE "^### Phase $n:.*\(COMPLETE\)\$" "$PLAN" || fail G8 "could not mark the phase $n heading"
     echo "| $n | $when | $commit | $tests | $coverage | $pylint | $notes |" >>"$PLAN"
-    sed -i.bak -E "s/^(### Phase $n: .*[^)])$/\1 (COMPLETE)/" "$PLAN" && rm -f "$PLAN.bak"
-    grep -qE "^### Phase $n:.*\(COMPLETE\)" "$PLAN" || fail G8 "could not mark the phase $n heading"
     echo "Gate Log row appended for phase $n ($commit). Commit it as 'M5 phase $n: gate log'."
 }
 

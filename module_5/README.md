@@ -197,6 +197,25 @@ This list mirrors them.
   `src/gradcafe_analytics.egg-info/`, so `*.egg-info/` and `build/` are in
   `.gitignore`.
 
+- **A1.6 Two bugs in `gate.sh` were found and fixed during the Phase 1 log
+  step.** The Gate Log row check matched any table row beginning `| 1 |`,
+  including the Pylint message counts earlier in `PLAN.md`, so it could report
+  a phase as logged when it was not. It now searches only from the
+  `## 11. Gate Log` heading on. The heading marker skipped headings that end
+  in a closing parenthesis, such as `(CHG-01, CHG-02)`, and it ran after the
+  row was appended, so a failure left a row without its `(COMPLETE)` mark. It
+  now marks the heading first. Neither bug affected a recorded result: Phase 0
+  was logged correctly, and the Phase 1 row was written by the fixed script.
+- **A1.7 The gate's own checkers have tests.** `tests/test_gate_checkers.py`
+  (marker `security`) feeds `check_secrets.py`, `check_change_register.py`, and
+  the `gate.sh log` step inputs they must reject, built in temporary
+  directories, and pairs each with an input they must accept. The scripts sit
+  outside `src/`, so coverage cannot notice a loosened regex. Each test was
+  checked against a deliberately broken copy of the script it covers, and
+  against the buggy `gate.sh` from A1.6, to confirm it fails. No Change
+  Register row is needed, since this is tooling and not a change to Module 4
+  behavior.
+
 ### Phase 6 amendments, decided in advance
 
 - **A6.1 Compiled-SQL check allows exactly the Phase 3 LIMIT.** Phase 3
