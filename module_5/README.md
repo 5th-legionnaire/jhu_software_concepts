@@ -39,11 +39,12 @@ Each row is one thing the assignment asks for, where it is, and one command that
 Pylint 10.00/10, Snyk 0 findings across all 70 pinned packages (22 found and fixed), 51 malicious-input cases, and
 phases 0 to 8 recorded in the Gate Log with their commit, test count and score.
 
-**Status.** Phases 0 to 8 are gated and in the Gate Log. Phase 9 (CI) is implemented and passed its offline gate;
-its live stage needs a green run of the pushed commit. Outstanding, and listed so nothing is assumed: the green CI
-screenshot `actions_success.png` (the file in this folder is still Module 4's until replaced), the Phase 9 Gate Log
-row, the PDF report, the Read the Docs repoint (Phase 11, after submission), and the items under
-[Known issues](#known-issues).
+**Status.** Phases 0 to 9 are complete and gated. CI run
+[37408248003](https://github.com/5th-legionnaire/jhu_software_concepts/actions/runs/37408248003) on commit `669064d` is
+green in all five jobs (`lint`, `dependency-graph`, `snyk`, `test (pip)`, `test (uv)`), shown in
+[actions_success.png](actions_success.png). The report is [module_5_report.pdf](module_5_report.pdf). What remains is
+after submission: repointing Read the Docs to this module (Phase 11, with Module 4 kept at the `module-4-final` tag).
+Limitations of the data and the application are under [Known issues](#known-issues).
 
 ## Get it running
 
