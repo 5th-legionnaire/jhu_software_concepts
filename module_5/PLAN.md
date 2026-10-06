@@ -876,7 +876,7 @@ violation and confirm it fails red, then delete the branch.
 covering every R17, R20, R22, R27, R34 and XC3 topic. Every README command was copy-pasted into a
 fresh shell and worked.
 
-### Phase 11: Verification, submission, RTD (CHG-20)
+### Phase 11: Verification, submission, RTD (CHG-20) (COMPLETE)
 
 **Entry:** standard. CI green on `HEAD`.
 
@@ -973,3 +973,4 @@ Appended by `gate.sh` at each phase exit.
 | 8 | 2026-10-05 22:59 | 68e107a | 588 | 100.00% | 10.00 | Snyk: 22 findings fixed by upgrading urllib3 and python-dotenv, 70 packages scanned, Snyk Code triaged (1 LOW accepted), CHG-21; amendments A8.1 to A8.8. |
 | 9 | 2026-10-05 23:26 | eea43e2 | 605 | 100.00% | 10.00 | Four-job CI green on run 37408248003 (669064d); hermetic suite; cruft removed; README restructured; PDF report; amendments A9.1 to A9.7, A10.1 to A10.4. |
 | 10 | 2026-10-05 23:33 | 4e12047 | 605 | 100.00% | 10.00 | Sphinx docs rewritten for Module 5 and clean under -W; docstring fixes; report rebuilt; amendment A10.5. |
+| 11 | 2026-10-05 23:36 | be7a251 | 605 | 100.00% | 10.00 | Read the Docs repointed to module_5 with fail_on_warning; module-4-final tag at 1ecf2c9; CHG-20 done; zip rebuilt; amendments A11.1, A11.2. |
