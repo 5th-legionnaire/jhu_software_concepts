@@ -164,7 +164,8 @@ gate() {
     grep -v "^phase-$n " "$GATE_DIR/scores" >"$GATE_DIR/scores.tmp"
     echo "phase-$n $score" >>"$GATE_DIR/scores.tmp"
     mv "$GATE_DIR/scores.tmp" "$GATE_DIR/scores"
-    echo "GATE PASSED for phase $n. Commit as 'M5 phase $n: <title>', then run: scripts/gate.sh log $n \"<notes>\""
+    echo "GATE PASSED for phase $n. Propose the commit 'M5 phase $n: <title>' to Josh, with the staged"
+    echo "file list, and commit only on his approval. Then run: scripts/gate.sh log $n \"<notes>\""
 }
 
 phase_checks() {
@@ -250,7 +251,7 @@ log_row() {
     sed -i.bak -E "/^### Phase $n: /{/\(COMPLETE\)\$/!s/\$/ (COMPLETE)/;}" "$PLAN" && rm -f "$PLAN.bak"
     grep -qE "^### Phase $n:.*\(COMPLETE\)\$" "$PLAN" || fail G8 "could not mark the phase $n heading"
     echo "| $n | $when | $commit | $tests | $coverage | $pylint | $notes |" >>"$PLAN"
-    echo "Gate Log row appended for phase $n ($commit). Commit it as 'M5 phase $n: gate log'."
+    echo "Gate Log row appended for phase $n ($commit). Propose the commit 'M5 phase $n: gate log' to Josh."
 }
 
 case "${1:-}" in

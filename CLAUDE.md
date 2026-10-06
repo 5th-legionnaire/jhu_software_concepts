@@ -16,9 +16,13 @@ pipeline. The plan, requirement matrix, and rubric breakdown are in
 ## How work proceeds
 
 - Phases in `module_5/PLAN.md` run in order. Before a phase:
-  `scripts/gate.sh entry <N>`. At its exit: `scripts/gate.sh <N>`, commit as
-  `M5 phase N: <title>`, then `scripts/gate.sh log <N> "<notes>"` and commit
-  that as `M5 phase N: gate log`. Stop for Josh's review after each phase.
+  `scripts/gate.sh entry <N>`. At its exit: `scripts/gate.sh <N>`, then the
+  `M5 phase N: <title>` commit, then `scripts/gate.sh log <N> "<notes>"` and
+  the `M5 phase N: gate log` commit. Stop for Josh's review after each phase.
+- **Josh approves every commit and push.** Show him the staged file list and
+  the full commit message, and wait for his yes. That includes gate-log and
+  small fix commits. A passing gate, or a script that says "commit", is not
+  approval.
 - Every design change from Module 4 needs a row in `module_5/CHANGES.md` and a
   README subsection anchored `chg-XX`, giving the problem, the decision, the
   trade-off, and the tests. No code change lands without its row; the gate
