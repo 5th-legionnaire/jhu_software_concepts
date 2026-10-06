@@ -660,7 +660,7 @@ for Josh's existing local DB.
 - `privileges.png` captured (`\du` and `\dp applicants`).
 - `rolsuper` is false for the account in `.env`.
 
-### Phase 6: Pylint 10.00/10 (CHG-10, CHG-14, CHG-15, CHG-16, CHG-17)
+### Phase 6: Pylint 10.00/10 (CHG-10, CHG-14, CHG-15, CHG-16, CHG-17) (COMPLETE)
 
 **Entry:** standard. Phases 3 to 5 complete, so the SQL rewrite has already removed most line-length hits.
 
@@ -908,3 +908,4 @@ Appended by `gate.sh` at each phase exit.
 | 3 | 2026-10-05 22:01 | 48b2a49 | 333 | 100.00% | 8.52 | Composed SQL, LIMIT everywhere, db_safety, parity with Module 4 over 30,000 rows; amendments A3.1 to A3.5. |
 | 4 | 2026-10-05 22:08 | 439845e | 443 | 100.00% | 8.68 | GET /api/applicants, Services seam, 51-case malicious-input matrix, live curl spot-checks; amendments A4.1 to A4.8. |
 | 5 | 2026-10-05 22:28 | c65c87c | 509 | 100.00% | 8.68 | Least-privilege roles, SCRAM verifiers, permanent credential leak check, privileges.txt and privileges.png; real DB migrated; amendments A5.1 to A5.11. |
+| 6 | 2026-10-05 22:37 | 2b50373 | 549 | 100.00% | 10.00 | Pylint 10.00/10 with no disables, stuck-busy fix, scrape and ORM refactors, compiled SQL and answer parity held; amendments A6.1 to A6.7. |
