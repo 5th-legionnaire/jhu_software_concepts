@@ -1,7 +1,7 @@
 """
 app.py: Flask application that displays the Grad Cafe analysis.
 
-EN 605.256 Modern Software Concepts in Python, Module 4.
+EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
 Written for Module 3; see the README for what Module 4 changed.
 

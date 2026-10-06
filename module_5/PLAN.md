@@ -294,6 +294,29 @@ module_5/
 - Snapshots committed. `/analysis` renders against the local DB.
 - Running `gate.sh 0` with a deliberately unmarked dummy test fails (then delete the dummy). This proves G2 bites.
 
+**Amendments** (mirrored in README "Changes to the plan")
+- **A0.1** E2 did not hold at entry: task 1 was already done in `19a3d0f`, and this v2 plan was an
+  uncommitted edit. The plan is committed with Phase 0. The copied `.venv`, `pull_work/`, `__pycache__/`,
+  and `.coverage` were deleted, and the venv was rebuilt, since its scripts pointed at `module_4/.venv`.
+  `PLAN.md` was already in `module_5/`.
+- **A0.2** The measured baseline is **8.30/10 with 52 messages** (20 E1102, not 19), on the same
+  toolchain. G3's baseline is 8.30. CHG-16 clears 22 false positives, not 21.
+- **A0.3** Module 4's lock has no Pylint, so `pylint==4.1.2` was installed separately for the
+  baseline. Phase 1 adds it to `setup.py`.
+- **A0.4** The parity snapshot is seeded with the full committed `data/llm_extend_applicant_data.json`
+  (30,000 rows), not the two conftest rows, which leave Q5, Q8, and Q9 at zero. Both snapshots were
+  captured from the frozen `module_4/src` by `scripts/capture_m4_snapshots.py`. The Phase 3 parity
+  test must seed the same file (about 2 s).
+- **A0.5** G8 checks the *previous* phase's row and heading. `gate.sh log N` writes this phase's row
+  after the commit, and only if `HEAD^{tree}` equals the tree that passed the gate. The row is
+  committed as `M5 phase N: gate log`, so E1 still holds.
+- **A0.6** G4 treats a `src/` file as new when `module_4/src` has no file of that name, since all of
+  `module_5/` postdates `1ecf2c9`.
+- **A0.7** G6 honors one time-boxed exception, the conftest literal
+  `postgres:postgres@localhost/gradcafe_test`, until Phase 2.
+- **A0.8** `CHANGES.md` adds a Status column. A row with no test reference must say `Evidence:`.
+- **A0.9** The `tests/conftest.py` byline was also updated to Module 5, because the file is edited here.
+
 ### Phase 1: Packaging and reproducible environment (CHG-01, CHG-02)
 
 **Entry:** standard. `uv --version` works.

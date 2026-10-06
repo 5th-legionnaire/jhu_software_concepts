@@ -1,7 +1,7 @@
 """
 scrape.py — GradCafe admissions results scraper.
 
-EN 605.256 Modern Software Concepts in Python, Module 4.
+EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
 Written for Module 2. Module 4 adds browser_factory, fetch_html, and sleep
 injection seams to scrape_data(), for the same reason pull_data.py added the

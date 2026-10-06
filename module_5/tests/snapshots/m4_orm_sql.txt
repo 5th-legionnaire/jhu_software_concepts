@@ -1,0 +1,64 @@
+-- q1_stmt
+SELECT count(*) AS count_1 
+FROM applicants 
+WHERE lower(applicants.term) = %(lower_1)s
+parameters: {'lower_1': 'fall 2026'}
+
+-- q2_stmt
+SELECT count(*) FILTER (WHERE lower(applicants.us_or_international) = %(lower_1)s) AS anon_1, count(*) AS count_1, (%(param_1)s * (count(*) FILTER (WHERE lower(applicants.us_or_international) = %(lower_1)s))) / CAST(nullif(count(*), %(nullif_1)s) AS NUMERIC) AS anon_2 
+FROM applicants 
+WHERE applicants.us_or_international IS NOT NULL AND trim(applicants.us_or_international) != %(trim_1)s
+parameters: {'lower_1': 'international', 'param_1': 100.0, 'nullif_1': 0, 'trim_1': ''}
+
+-- q3_stmt
+SELECT avg(applicants.gpa) FILTER (WHERE applicants.gpa BETWEEN %(gpa_1)s AND %(gpa_2)s) AS anon_1, avg(applicants.gre) FILTER (WHERE applicants.gre BETWEEN %(gre_1)s AND %(gre_2)s) AS anon_2, avg(applicants.gre_v) FILTER (WHERE applicants.gre_v BETWEEN %(gre_v_1)s AND %(gre_v_2)s) AS anon_3, avg(applicants.gre_aw) FILTER (WHERE applicants.gre_aw BETWEEN %(gre_aw_1)s AND %(gre_aw_2)s) AS anon_4, count(applicants.gpa) FILTER (WHERE applicants.gpa BETWEEN %(gpa_3)s AND %(gpa_4)s) AS anon_5, count(applicants.gre) FILTER (WHERE applicants.gre BETWEEN %(gre_3)s AND %(gre_4)s) AS anon_6, count(applicants.gre_v) FILTER (WHERE applicants.gre_v BETWEEN %(gre_v_3)s AND %(gre_v_4)s) AS anon_7, count(applicants.gre_aw) FILTER (WHERE applicants.gre_aw BETWEEN %(gre_aw_3)s AND %(gre_aw_4)s) AS anon_8, count(applicants.gpa) - (count(applicants.gpa) FILTER (WHERE applicants.gpa BETWEEN %(gpa_5)s AND %(gpa_6)s)) AS anon_9, count(applicants.gre) - (count(applicants.gre) FILTER (WHERE applicants.gre BETWEEN %(gre_5)s AND %(gre_6)s)) AS anon_10, count(applicants.gre_v) - (count(applicants.gre_v) FILTER (WHERE applicants.gre_v BETWEEN %(gre_v_5)s AND %(gre_v_6)s)) AS anon_11, count(applicants.gre_aw) - (count(applicants.gre_aw) FILTER (WHERE applicants.gre_aw BETWEEN %(gre_aw_5)s AND %(gre_aw_6)s)) AS anon_12 
+FROM applicants
+parameters: {'gpa_1': 0.0, 'gpa_2': 4.0, 'gre_1': 130.0, 'gre_2': 170.0, 'gre_v_1': 130.0, 'gre_v_2': 170.0, 'gre_aw_1': 0.0, 'gre_aw_2': 6.0, 'gpa_3': 0.0, 'gpa_4': 4.0, 'gre_3': 130.0, 'gre_4': 170.0, 'gre_v_3': 130.0, 'gre_v_4': 170.0, 'gre_aw_3': 0.0, 'gre_aw_4': 6.0, 'gpa_5': 0.0, 'gpa_6': 4.0, 'gre_5': 130.0, 'gre_6': 170.0, 'gre_v_5': 130.0, 'gre_v_6': 170.0, 'gre_aw_5': 0.0, 'gre_aw_6': 6.0}
+
+-- q4_stmt
+SELECT avg(applicants.gpa) AS avg_1, count(applicants.gpa) AS count_1 
+FROM applicants 
+WHERE lower(applicants.term) = %(lower_1)s AND lower(applicants.us_or_international) = %(lower_2)s AND applicants.gpa BETWEEN %(gpa_1)s AND %(gpa_2)s
+parameters: {'lower_1': 'fall 2026', 'lower_2': 'american', 'gpa_1': 0.0, 'gpa_2': 4.0}
+
+-- q5_stmt
+SELECT count(*) FILTER (WHERE lower(applicants.status) = %(lower_1)s) AS anon_1, count(*) AS count_1, (%(param_1)s * (count(*) FILTER (WHERE lower(applicants.status) = %(lower_1)s))) / CAST(nullif(count(*), %(nullif_1)s) AS NUMERIC) AS anon_2 
+FROM applicants 
+WHERE lower(applicants.term) = %(lower_2)s
+parameters: {'lower_1': 'accepted', 'param_1': 100.0, 'nullif_1': 0, 'lower_2': 'fall 2025'}
+
+-- q6_stmt
+SELECT avg(applicants.gpa) AS avg_1, count(applicants.gpa) AS count_1 
+FROM applicants 
+WHERE lower(applicants.term) = %(lower_1)s AND lower(applicants.status) = %(lower_2)s AND applicants.gpa BETWEEN %(gpa_1)s AND %(gpa_2)s
+parameters: {'lower_1': 'fall 2026', 'lower_2': 'accepted', 'gpa_1': 0.0, 'gpa_2': 4.0}
+
+-- q7_stmt
+SELECT count(*) AS count_1 
+FROM applicants 
+WHERE applicants.program ~* %(program_1)s AND applicants.program ~* %(program_2)s AND lower(applicants.degree) = %(lower_1)s
+parameters: {'program_1': 'johns? hopkins|\\mjhu\\M', 'program_2': 'computer science', 'lower_1': 'masters'}
+
+-- q8_stmt
+SELECT count(*) AS count_1 
+FROM applicants 
+WHERE lower(applicants.term) = %(lower_1)s AND lower(applicants.status) = %(lower_2)s AND lower(applicants.degree) = %(lower_3)s AND applicants.program ~* %(program_1)s AND (applicants.program ~* %(program_2)s OR applicants.program ~* %(program_3)s OR applicants.program ~* %(program_4)s OR applicants.program ~* %(program_5)s OR applicants.program ~* %(program_6)s OR applicants.program ~* %(program_7)s)
+parameters: {'lower_1': 'fall 2026', 'lower_2': 'accepted', 'lower_3': 'phd', 'program_1': 'computer science', 'program_2': 'georgetown', 'program_3': 'massachusetts institute of technology', 'program_4': '\\mmit\\M', 'program_5': 'stanford', 'program_6': 'carnegie mellon', 'program_7': '\\mcmu\\M'}
+
+-- q9_stmt
+SELECT count(*) AS count_1 
+FROM applicants 
+WHERE lower(applicants.term) = %(lower_1)s AND lower(applicants.status) = %(lower_2)s AND lower(applicants.degree) = %(lower_3)s AND applicants.llm_generated_program ~* %(llm_generated_program_1)s AND (applicants.llm_generated_university ~* %(llm_generated_university_1)s OR applicants.llm_generated_university ~* %(llm_generated_university_2)s OR applicants.llm_generated_university ~* %(llm_generated_university_3)s OR applicants.llm_generated_university ~* %(llm_generated_university_4)s OR applicants.llm_generated_university ~* %(llm_generated_university_5)s OR applicants.llm_generated_university ~* %(llm_generated_university_6)s)
+parameters: {'lower_1': 'fall 2026', 'lower_2': 'accepted', 'lower_3': 'phd', 'llm_generated_program_1': 'computer science', 'llm_generated_university_1': 'georgetown', 'llm_generated_university_2': 'massachusetts institute of technology', 'llm_generated_university_3': '\\mmit\\M', 'llm_generated_university_4': 'stanford', 'llm_generated_university_5': 'carnegie mellon', 'llm_generated_university_6': '\\mcmu\\M'}
+
+-- uq1_stmt
+SELECT CASE WHEN (applicants.gpa BETWEEN %(gpa_1)s AND %(gpa_2)s) THEN %(param_1)s ELSE %(param_2)s END AS gpa_reported, count(*) AS count_1, count(*) FILTER (WHERE lower(applicants.status) = %(lower_1)s) AS anon_1, (%(param_3)s * (count(*) FILTER (WHERE lower(applicants.status) = %(lower_1)s))) / CAST(nullif(count(*), %(nullif_1)s) AS NUMERIC) AS anon_2 
+FROM applicants 
+WHERE lower(applicants.term) = %(lower_2)s GROUP BY CASE WHEN (applicants.gpa BETWEEN %(gpa_1)s AND %(gpa_2)s) THEN %(param_1)s ELSE %(param_2)s END ORDER BY gpa_reported DESC
+parameters: {'gpa_1': 0.0, 'gpa_2': 4.0, 'param_1': 'Reported GPA', 'param_2': 'No usable GPA', 'lower_1': 'accepted', 'param_3': 100.0, 'nullif_1': 0, 'lower_2': 'fall 2026'}
+
+-- uq2_stmt
+SELECT CASE WHEN (lower(applicants.degree) = %(lower_1)s) THEN %(param_1)s ELSE %(param_2)s END AS degree_group, CASE WHEN (lower(applicants.us_or_international) = %(lower_2)s) THEN %(param_3)s ELSE %(param_4)s END AS nationality, count(*) AS count_1, count(*) FILTER (WHERE lower(applicants.status) = %(lower_3)s) AS anon_1, (%(param_5)s * (count(*) FILTER (WHERE lower(applicants.status) = %(lower_3)s))) / CAST(nullif(count(*), %(nullif_1)s) AS NUMERIC) AS anon_2 
+FROM applicants 
+WHERE lower(applicants.term) = %(lower_4)s AND (lower(applicants.degree) = %(lower_1)s OR lower(applicants.degree) = %(lower_5)s) AND (lower(applicants.us_or_international) = %(lower_2)s OR lower(applicants.us_or_international) = %(lower_6)s) GROUP BY CASE WHEN (lower(applicants.degree) = %(lower_1)s) THEN %(param_1)s ELSE %(param_2)s END, CASE WHEN (lower(applicants.us_or_international) = %(lower_2)s) THEN %(param_3)s ELSE %(param_4)s END ORDER BY degree_group DESC, nationality
+parameters: {'lower_1': 'phd', 'param_1': 'PhD', 'param_2': 'Masters', 'lower_2': 'american', 'param_3': 'American', 'param_4': 'International', 'lower_3': 'accepted', 'param_5': 100.0, 'nullif_1': 0, 'lower_4': 'fall 2026', 'lower_5': 'masters', 'lower_6': 'international'}

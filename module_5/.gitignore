@@ -12,3 +12,4 @@ docs/_build/
 ~$*
 pull_work/
 .pull_data.lock
+.gate/

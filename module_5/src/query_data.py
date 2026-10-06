@@ -2,7 +2,7 @@
 query_data.py: This program answers the Module 3 analysis questions about
 Grad Cafe submissions using SQL queries executed through psycopg.
 
-EN 605.256 Modern Software Concepts in Python, Module 4.
+EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
 Written for Module 3 and carried over unchanged.
 

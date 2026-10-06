@@ -1,0 +1,6 @@
+# Pylint configuration for module_5. Run from module_5/:
+#     pylint --rcfile=.pylintrc src
+# This file says where the code lives. It relaxes no rule (decision D6 in
+# PLAN.md); Phase 6 adds only the SQLAlchemy declarative-base exclusion.
+[MAIN]
+source-roots=src

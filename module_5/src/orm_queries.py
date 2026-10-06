@@ -2,7 +2,7 @@
 orm_queries.py: This program repeats selected Module 3 analyses using the
 SQLAlchemy ORM instead of handwritten SQL.
 
-EN 605.256 Modern Software Concepts in Python, Module 4.
+EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
 Written for Module 3. Module 4 adds REQUIRED_FIELDS and fetch_one(), the
 simple query function the testing assignment asks for; the Module 3 analyses

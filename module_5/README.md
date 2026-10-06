@@ -13,6 +13,97 @@
 > "section 5.2"; renumbering during this module broke those references silently.
 > Source comments now name headings by title instead.
 
+**Module 5 work in progress.** This folder began as a copy of `module_4/`.
+The sections from "Deliverables checklist" onward still describe Module 4
+and are rewritten in Phase 10 of [PLAN.md](PLAN.md). The two sections below
+are maintained from Phase 0 on: every design change from Module 4, and every
+change to the plan itself.
+
+## Changes from Module 4
+
+One subsection per row of the Change Register, [CHANGES.md](CHANGES.md). Each
+gives the problem, the decision, and the trade-off accepted, and names the
+tests that verify it. `scripts/gate.sh` refuses to pass a phase whose rows lack
+a subsection here.
+
+<a id="chg-18"></a>
+
+### CHG-18: The whole suite runs, and an unmarked test stops it
+
+**Problem.** Module 4 ran its tests by marker expression
+(`pytest -m "web or buttons or analysis or db or integration"`). Module 5 adds
+a `security` marker. A test carrying only that marker would have been
+deselected and never run, and nothing would have reported it.
+
+**Decision.** `pytest.ini` now runs every collected test with no marker
+selection. It adds `--strict-markers`, so a misspelled marker is an error, and
+registers `security`. A collection hook in `tests/conftest.py` stops the
+session before any test runs if a test carries none of the markers that
+`pytest.ini` declares, and lists every offender by node ID. The hook reads the
+markers from `pytest.ini` itself. pytest's own marker list also contains
+built-ins such as `parametrize` and `skipif`, and a test carrying only one of
+those would otherwise have passed the check. A test caught this while the hook
+was being written.
+
+**Trade-off.** The Module 4 command still works, but it is no longer the
+command of record. Plain `pytest` from `module_5/` is.
+
+**Verified by.**
+`tests/test_lint_policy.py::test_every_collected_test_is_marked`,
+`::test_unmarked_items_reports_only_tests_without_an_allowed_marker`,
+`::test_collection_hook_rejects_an_unmarked_test_by_name`. `scripts/gate.sh 0`
+also adds an unmarked dummy test, confirms collection fails and names it, then
+deletes the dummy.
+
+## Changes to the plan
+
+[PLAN.md](PLAN.md) records each amendment under the phase that raised it.
+This list mirrors them.
+
+### Phase 0 amendments
+
+- **A0.1 Entry state.** The copy (task 1) had already been made in commit
+  `19a3d0f`, and the v2 plan was an uncommitted edit, so check E2 (clean tree)
+  did not hold at entry. The plan is committed with Phase 0. The copied
+  `.venv`, `pull_work/`, `__pycache__/`, and `.coverage` were untracked
+  duplicates of Module 4's. They were deleted, and the venv was rebuilt,
+  because its scripts still pointed at `module_4/.venv`.
+- **A0.2 Pylint baseline is 8.30, not 8.36.** It was measured on the same
+  toolchain (pylint 4.1.2, astroid 4.3.3, Python 3.14.6). There are 52
+  messages, not 51: 20 `not-callable` false positives on `func.count()`, not
+  19. CHG-16 therefore clears 22 false positives, not 21. G3's baseline is the
+  measured 8.30.
+- **A0.3 Pylint installed outside the lock.** Module 4's `requirements.txt`
+  has no Pylint, so `pylint==4.1.2` was installed into the venv separately to
+  take the baseline. Phase 1 adds it to `setup.py` and the lock.
+- **A0.4 Parity snapshot uses the full dataset.** The snapshot is seeded with
+  all 30,000 rows of the committed `data/llm_extend_applicant_data.json`, not
+  the two conftest rows. Two rows leave Q5, Q8, and Q9 at zero, so a broken
+  regex or range bind could pass the parity test unnoticed. The snapshots were
+  captured from the frozen `module_4/src` by the new
+  `scripts/capture_m4_snapshots.py`. The Phase 3 parity test seeds the same
+  file, which takes about 2 seconds.
+- **A0.5 Gate Log timing.** A Gate Log row records its phase's commit, so it
+  cannot exist when the gate runs. The gate (G8) checks the previous phase's
+  row and heading instead. After the phase commit, `scripts/gate.sh log N`
+  appends the row and marks the heading. It refuses to do so unless the
+  commit's tree is the exact tree that passed the gate. The row is committed as
+  `M5 phase N: gate log`, which still satisfies E1.
+- **A0.6 "New `src/` files" for G4.** All of `module_5/` was added after
+  `1ecf2c9`, so G4 treats a file as new when `module_4/src` has no file of
+  that name.
+- **A0.7 One time-boxed secrets exception.** Module 4's conftest falls back to
+  `postgres:postgres@localhost/gradcafe_test` for the local test database.
+  `scripts/check_secrets.py` allows that one literal until Phase 2 and fails
+  on it from then on, when tests move to environment-only URLs.
+- **A0.8 Change Register format.** `CHANGES.md` adds a Status column. A row
+  with no test reference must say `Evidence:` (CHG-20, the Read the Docs
+  check).
+- **A0.9 Test header byline.** Task 7 names `src/` only. `tests/conftest.py`
+  is edited in this phase, so its attribution byline was also updated to
+  Module 5. Provenance references to Modules 2, 3, and 4 are unchanged
+  throughout.
+
 ## Deliverables checklist
 
 Checked against the assignment's own numbered deliverables list, each item

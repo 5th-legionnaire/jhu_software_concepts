@@ -3,7 +3,7 @@ load_data.py: This program takes the cleaned applicant data
 produced in Module 2 and loads it into a PostgreSQL database
 (it may reuse existing functionality / move around content from clean.py and scrape.py).
 
-EN 605.256 Modern Software Concepts in Python, Module 4.
+EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
 Written for Module 3; see the README for what Module 4 changed.
 

@@ -1,7 +1,10 @@
-"""Shared fixtures and test doubles for the Module 4 suite.
+"""Shared fixtures, test doubles, and the marker policy for the Module 5 suite.
 
-EN 605.256 Modern Software Concepts in Python, Module 4.
+EN 605.256 Modern Software Concepts in Python, Module 5.
 Joshua Latz (jlatz1)
+
+Written for Module 4. Module 5 adds the marker policy hook at the end of this
+file (CHG-18 in CHANGES.md).
 
 No test in this suite touches the live internet, launches a browser, runs a
 real scrape, or calls sleep(). The scraper, loader, and query functions reach
@@ -18,6 +21,7 @@ Two application fixtures, for two different needs:
                       integration tests use this.
 """
 
+import configparser
 import datetime
 import os
 import sys
@@ -233,3 +237,39 @@ def db_client(fake_scraper, clean_db, db_url):
     """
     app = create_app(scraper=fake_scraper, database_url=db_url, testing=True)
     return app.test_client()
+
+
+# --- Marker policy (CHG-18) ------------------------------------------------
+
+def registered_markers(config):
+    """Names of the category markers pytest.ini declares, such as "web" and "db".
+
+    Read from pytest.ini itself rather than config.getini("markers"), which
+    also lists pytest's and plugins' built-in markers (skipif, parametrize,
+    no_cover). A test carrying only one of those would otherwise pass.
+    """
+    parser = configparser.ConfigParser()
+    parser.read(config.inipath, encoding="utf-8")
+    lines = parser["pytest"]["markers"].splitlines()
+    return {line.split(":", 1)[0].strip() for line in lines if line.strip()}
+
+
+def unmarked_items(items, allowed):
+    """Node IDs of the collected tests that carry none of the allowed markers."""
+    return [item.nodeid for item in items
+            if not any(item.get_closest_marker(name) for name in allowed)]
+
+
+def pytest_collection_modifyitems(config, items):
+    """Stop the session at collection if any test is unmarked.
+
+    The suite runs in full rather than by marker expression, so an unmarked
+    test would still run and nothing would notice the rubric violation.
+    Failing here, before any test executes, names every offender at once.
+    """
+    missing = unmarked_items(items, registered_markers(config))
+    if missing:
+        raise pytest.UsageError(
+            "Every test needs one of the markers registered in pytest.ini. Unmarked:\n  "
+            + "\n  ".join(missing)
+        )

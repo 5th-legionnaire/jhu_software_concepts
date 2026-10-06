@@ -1,0 +1,232 @@
+#!/usr/bin/env bash
+# gate.sh: the Module 5 phase gate (PLAN.md section 3).
+#
+# EN 605.256 Modern Software Concepts in Python, Module 5.
+# Joshua Latz (jlatz1)
+#
+# Usage (from any directory):
+#   scripts/gate.sh entry <N>          standard entry checks E1 to E3 before phase N
+#   scripts/gate.sh <N>                exit gate G1 to G9 for phase N
+#   scripts/gate.sh log <N> "<notes>"  after the "M5 phase N" commit: append the
+#                                      Gate Log row and mark the heading COMPLETE
+#
+# The exit gate fails fast and names the check that failed. On a pass it
+# records the working tree's git tree hash in .gate/phase-N.pass; "log" refuses
+# to run unless HEAD's tree is that exact tree, so the Gate Log can only ever
+# describe a commit whose contents passed the gate.
+
+set -uo pipefail
+
+MODULE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+REPO="$(git -C "$MODULE_DIR" rev-parse --show-toplevel)"
+PY="$MODULE_DIR/.venv/bin/python"
+M4_SRC="$REPO/module_4/src"
+GATE_DIR="$MODULE_DIR/.gate"
+PLAN="$MODULE_DIR/PLAN.md"
+PY_VERSION="3.14.6"
+
+cd "$MODULE_DIR" || exit 1
+mkdir -p "$GATE_DIR"
+
+fail() { echo "GATE FAILED [$1]: $2" >&2; exit 1; }
+ok() { echo "  ok  $1  $2"; }
+
+# Tree hash of the working tree as it would be committed (gitignore respected),
+# computed in a scratch index so the real index is untouched.
+worktree_tree() {
+    local idx
+    idx="$(mktemp)"
+    cp "$(git -C "$REPO" rev-parse --absolute-git-dir)/index" "$idx"
+    GIT_INDEX_FILE="$idx" git -C "$REPO" add -A >/dev/null 2>&1
+    GIT_INDEX_FILE="$idx" git -C "$REPO" write-tree
+    rm -f "$idx"
+}
+
+check_venv() {
+    [ -x "$PY" ] || fail E3 "no venv at module_5/.venv"
+    local version prefix
+    version="$("$PY" -c 'import platform; print(platform.python_version())')"
+    prefix="$("$PY" -c 'import sys; print(sys.prefix)')"
+    [ "$version" = "$PY_VERSION" ] || fail E3 "venv Python is $version, expected $PY_VERSION"
+    [ "$prefix" = "$MODULE_DIR/.venv" ] || fail E3 "venv prefix is $prefix"
+    if [ -n "${VIRTUAL_ENV:-}" ] && [ "$VIRTUAL_ENV" != "$MODULE_DIR/.venv" ]; then
+        fail E3 "a different venv is active: $VIRTUAL_ENV"
+    fi
+    ok E3 "module_5/.venv, Python $version"
+}
+
+pylint_score() {  # $1: output file
+    grep -oE "rated at -?[0-9]+\.[0-9]+" "$1" | grep -oE -- "-?[0-9]+\.[0-9]+$"
+}
+
+# ---------------------------------------------------------------- entry
+entry() {
+    local n="$1"
+    if [ "$n" -gt 0 ]; then
+        local prev=$((n - 1)) subject
+        subject="$(git -C "$REPO" log -1 --format=%s)"
+        case "$subject" in "M5 phase $prev"*) ;; *) fail E1 "HEAD is '$subject', expected 'M5 phase $prev...'" ;; esac
+        grep -qE "^\| $prev \|" "$PLAN" || fail E1 "Gate Log has no row for phase $prev"
+        ok E1 "phase $prev committed and logged"
+    else
+        ok E1 "phase 0 has no predecessor"
+    fi
+    [ -z "$(git -C "$REPO" status --porcelain)" ] || fail E2 "working tree is not clean"
+    ok E2 "working tree clean"
+    check_venv
+    echo "ENTRY OK for phase $n. Phase-specific entry checks (E4) are listed in PLAN.md."
+}
+
+# ---------------------------------------------------------------- exit gate
+gate() {
+    local n="$1"
+    echo "Gate for phase $n"
+    check_venv
+
+    # G1 + G2: full suite, coverage gate, strict markers, unmarked-test hook.
+    local log="$GATE_DIR/phase-$n-pytest.log"
+    "$PY" -m pytest >"$log" 2>&1
+    local rc=$?
+    grep -q "UsageError\|Every test needs one of the markers" "$log" && fail G2 "unmarked test(s); see $log"
+    [ "$rc" -eq 0 ] || fail G1 "pytest exited $rc; see $log"
+    local passed coverage
+    passed="$(grep -oE "[0-9]+ passed" "$log" | tail -1 | grep -oE "[0-9]+")"
+    coverage="$(grep -oE "Total coverage: [0-9.]+%" "$log" | grep -oE "[0-9.]+%")"
+    grep -qE "[0-9]+ (failed|error)" "$log" && fail G1 "failures or errors in $log"
+    ok G1 "$passed passed, coverage $coverage"
+    ok G2 "collection hook accepted every test"
+
+    # G3: Pylint non-regressing; exactly 10.00 with no messages from phase 6.
+    local lint="$GATE_DIR/phase-$n-pylint.txt" score prev
+    "$PY" -m pylint --rcfile=.pylintrc src >"$lint" 2>&1
+    score="$(pylint_score "$lint")"
+    [ -n "$score" ] || fail G3 "could not read a Pylint score; see $lint"
+    [ -f "$GATE_DIR/scores" ] || fail G3 ".gate/scores has no baseline (PLAN.md Phase 0 task 8)"
+    prev="$(grep -v "^phase-$n " "$GATE_DIR/scores" | tail -1 | awk '{print $2}')"
+    awk -v s="$score" -v p="$prev" 'BEGIN { exit !(s + 0 >= p + 0) }' \
+        || fail G3 "Pylint $score is below the previous gate's $prev"
+    if [ "$n" -ge 6 ]; then
+        [ "$score" = "10.00" ] || fail G3 "Pylint $score; phase 6 on requires 10.00"
+        grep -qE "^src/.*: [CRWEF][0-9]{4}" "$lint" && fail G3 "Pylint messages remain; see $lint"
+    fi
+    ok G3 "Pylint $score (previous $prev)"
+
+    # G4: every src/ module that Module 4 did not have lints clean on its own.
+    local f new=0
+    for f in src/*.py; do
+        [ -e "$M4_SRC/$(basename "$f")" ] && continue
+        new=$((new + 1))
+        "$PY" -m pylint --rcfile=.pylintrc --fail-under=10 "$f" >"$GATE_DIR/new-file.txt" 2>&1 \
+            || fail G4 "$f is new and not 10.00/10; see .gate/new-file.txt"
+    done
+    ok G4 "$new new src/ module(s), all 10.00/10"
+
+    # G5: no inline disables.
+    if grep -rn "pylint: disable" src; then fail G5 "inline pylint disable in src/"; fi
+    ok G5 "no inline disables"
+
+    # G6: .env untracked; no credential-shaped literals.
+    if git -C "$MODULE_DIR" ls-files --error-unmatch .env >/dev/null 2>&1; then
+        fail G6 ".env is tracked by git"
+    fi
+    "$PY" scripts/check_secrets.py "$n" || fail G6 "credential-shaped literal found"
+    ok G6 ".env untracked, secrets scan clean"
+
+    # G7: Change Register integrity.
+    "$PY" scripts/check_change_register.py "$n" || fail G7 "Change Register incomplete"
+    ok G7 "Change Register rows due by phase $n are complete"
+
+    # G8: plan hygiene for the previous phase. This phase's row and heading
+    # are written by "gate.sh log" after the commit, since the row records it.
+    if [ "$n" -eq 0 ]; then
+        grep -qE "^\| baseline \|" "$PLAN" || fail G8 "Gate Log has no baseline row"
+    else
+        local prev_n=$((n - 1))
+        grep -qE "^\| $prev_n \|" "$PLAN" || fail G8 "Gate Log has no row for phase $prev_n"
+        grep -qE "^### Phase $prev_n:.*\(COMPLETE\)" "$PLAN" || fail G8 "phase $prev_n heading not marked COMPLETE"
+    fi
+    ok G8 "previous phase logged and marked"
+
+    # G9: phase-specific exit checks.
+    phase_checks "$n"
+
+    printf "tree=%s\ntests=%s\ncoverage=%s\npylint=%s\n" \
+        "$(worktree_tree)" "$passed" "$coverage" "$score" >"$GATE_DIR/phase-$n.pass"
+    grep -v "^phase-$n " "$GATE_DIR/scores" >"$GATE_DIR/scores.tmp"
+    echo "phase-$n $score" >>"$GATE_DIR/scores.tmp"
+    mv "$GATE_DIR/scores.tmp" "$GATE_DIR/scores"
+    echo "GATE PASSED for phase $n. Commit as 'M5 phase $n: <title>', then run: scripts/gate.sh log $n \"<notes>\""
+}
+
+phase_checks() {
+    case "$1" in
+    0)
+        local snap
+        for snap in tests/snapshots/m4_run_all.txt tests/snapshots/m4_orm_sql.txt; do
+            [ -s "$snap" ] || fail G9 "missing or empty snapshot $snap"
+        done
+        ok G9 "parity snapshots present"
+
+        # Every Module 4 test is still collected here (none lost in the copy).
+        local m4_ids m5_ids missing
+        m4_ids="$(cd "$REPO/module_4" && "$PY" -m pytest --collect-only --no-cov -p no:cacheprovider 2>/dev/null | grep "::" | sort)"
+        m5_ids="$("$PY" -m pytest --collect-only --no-cov -p no:cacheprovider 2>/dev/null | grep "::" | sort)"
+        missing="$(comm -23 <(echo "$m4_ids") <(echo "$m5_ids"))"
+        [ "$(echo "$m4_ids" | grep -c "::")" -eq 102 ] || fail G9 "expected 102 Module 4 tests"
+        [ -z "$missing" ] || fail G9 "Module 4 tests missing from module_5: $missing"
+        ok G9 "all 102 Module 4 tests carried over and passing"
+
+        # G2 must bite: an unmarked dummy test has to stop collection.
+        local probe="tests/test_zz_gate_unmarked_probe.py" out
+        printf '"""Gate probe; deleted by gate.sh."""\n\n\ndef test_probe():\n    assert True\n' >"$probe"
+        out="$("$PY" -m pytest --collect-only --no-cov -p no:cacheprovider 2>&1)"
+        local probe_rc=$?
+        rm -f "$probe"
+        [ "$probe_rc" -ne 0 ] && echo "$out" | grep -q "test_zz_gate_unmarked_probe.py::test_probe" \
+            || fail G9 "an unmarked dummy test was not rejected (G2 does not bite)"
+        ok G9 "unmarked dummy test rejected, then deleted"
+
+        # /analysis renders against the local database from .env.
+        PYTHONPATH=src "$PY" -c "
+from app import create_app
+response = create_app().test_client().get('/analysis')
+assert response.status_code == 200, response.status_code
+assert 'Q1' in response.get_data(as_text=True)
+" >/dev/null 2>&1 || fail G9 "/analysis did not render against the local database"
+        ok G9 "/analysis renders against the local database"
+        ;;
+    *)
+        echo "  --  G9  no phase-specific checks defined for phase $1 yet"
+        ;;
+    esac
+}
+
+# ---------------------------------------------------------------- log
+log_row() {
+    local n="$1" notes="$2" pass="$GATE_DIR/phase-$1.pass"
+    [ -f "$pass" ] || fail G8 "no recorded gate pass for phase $n; run scripts/gate.sh $n"
+    local subject tree
+    subject="$(git -C "$REPO" log -1 --format=%s)"
+    case "$subject" in "M5 phase $n"*) ;; *) fail G8 "HEAD is '$subject', not the phase $n commit" ;; esac
+    tree="$(git -C "$REPO" rev-parse 'HEAD^{tree}')"
+    [ "$tree" = "$(grep '^tree=' "$pass" | cut -d= -f2)" ] \
+        || fail G8 "HEAD's contents differ from what passed the gate; rerun scripts/gate.sh $n"
+    grep -qE "^\| $n \|" "$PLAN" && fail G8 "Gate Log already has a row for phase $n"
+    local commit when tests coverage pylint
+    commit="$(git -C "$REPO" rev-parse --short HEAD)"
+    when="$(TZ=America/New_York date "+%Y-%m-%d %H:%M")"
+    tests="$(grep '^tests=' "$pass" | cut -d= -f2)"
+    coverage="$(grep '^coverage=' "$pass" | cut -d= -f2)"
+    pylint="$(grep '^pylint=' "$pass" | cut -d= -f2)"
+    echo "| $n | $when | $commit | $tests | $coverage | $pylint | $notes |" >>"$PLAN"
+    sed -i.bak -E "s/^(### Phase $n: .*[^)])$/\1 (COMPLETE)/" "$PLAN" && rm -f "$PLAN.bak"
+    grep -qE "^### Phase $n:.*\(COMPLETE\)" "$PLAN" || fail G8 "could not mark the phase $n heading"
+    echo "Gate Log row appended for phase $n ($commit). Commit it as 'M5 phase $n: gate log'."
+}
+
+case "${1:-}" in
+    entry) [ $# -eq 2 ] || { echo "usage: $0 entry <N>"; exit 2; }; entry "$2" ;;
+    log)   [ $# -eq 3 ] || { echo "usage: $0 log <N> \"<notes>\""; exit 2; }; log_row "$2" "$3" ;;
+    ''|*[!0-9]*) echo "usage: $0 <N> | entry <N> | log <N> \"<notes>\""; exit 2 ;;
+    *)     gate "$1" ;;
+esac

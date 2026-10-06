@@ -1,0 +1,21 @@
+Q1  Fall 2026 applicant count: 29,576
+Q2  Percent international: 46.53% (13,650 of 29,336 classified entries)
+Q3  Average GPA: 3.77 (n=17,974, 134 off-scale excluded)
+    Average GRE Quantitative: 165.83 (n=954, 1,438 off-scale excluded)
+    Average GRE Verbal: 160.70 (n=2,002, 4 off-scale excluded)
+    Average GRE Analytical Writing: 4.35 (n=1,807, 80 off-scale excluded)
+Q4  Average GPA of American Fall 2026 applicants: 3.79 (n=10,180)
+Q5  Fall 2025 acceptance percentage: 47.92% (92 of 192 Fall 2025 entries)
+Q6  Average GPA of accepted Fall 2026 applicants: 3.76 (n=7,204)
+Q7  JHU Masters in Computer Science count: 8
+Q8  Original-field count: 28
+Q9  LLM-field count: 28
+    Difference: 0
+UQ1 Fall 2026 acceptance rate by whether a GPA was reported:
+    Reported GPA: 40.71% (7,204 of 17,695)
+    No usable GPA: 31.73% (3,770 of 11,881)
+UQ2 Fall 2026 acceptance rate by degree and nationality:
+    PhD, American: 25.39% (2,546 of 10,029)
+    PhD, International: 26.11% (2,781 of 10,650)
+    Masters, American: 68.64% (3,021 of 4,401)
+    Masters, International: 67.45% (1,846 of 2,737)
